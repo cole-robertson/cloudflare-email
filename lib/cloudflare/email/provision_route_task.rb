@@ -23,8 +23,9 @@ module Cloudflare
       end
 
       def call
-        api_token = credential(:api_token)
-        raise "Missing cloudflare.api_token in credentials (or CLOUDFLARE_API_TOKEN env var)" if api_token.empty?
+        require "cloudflare/email/credentials"
+        api_token = Cloudflare::Email::Credentials.management_token
+        raise "Missing cloudflare.api_token or cloudflare.management_token (Rails credentials or env var)" if api_token.empty?
         raise "Missing ADDRESS=address@domain" if @address.empty?
 
         @io.puts "Provisioning Email Routing:"
@@ -47,18 +48,6 @@ module Cloudflare
         1
       end
 
-      private
-
-      def credential(key)
-        from_credentials =
-          if defined?(Rails) && Rails.application
-            Rails.application.credentials.dig(:cloudflare, key).to_s
-          else
-            ""
-          end
-        return from_credentials unless from_credentials.empty?
-        ENV["CLOUDFLARE_#{key.to_s.upcase}"].to_s
-      end
     end
   end
 end

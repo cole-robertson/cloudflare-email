@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+- **`Cloudflare::Email::SecureReply`** — HMAC-signed, time-boxed reply-to
+  addresses. Inspired by Cloudflare's Agents SDK `createSecureReplyEmailResolver`
+  but stateless (no Durable Object storage). `encode(payload:, domain:, secret:)`
+  returns a `reply.<base64>.<hmac>@domain` address; `decode(address, secret:)`
+  returns the original payload or raises `InvalidToken`. 30-day default
+  max-age, 128-bit truncated HMAC-SHA256 to fit RFC 5321's 64-char local-part
+  limit. Verified end-to-end against live Cloudflare.
+- **`bin/rails cloudflare:email:provision_catchall DOMAIN=...`** — one-shot
+  catch-all rule setup for a zone. Essential for SecureReply where every
+  reply address is unique.
+- **`Cloudflare::Email::Credentials`** — unified credential lookup: Rails
+  credentials first, then `CLOUDFLARE_*` env vars. Supports both workflows
+  (credentials.yml.enc AND `.env` / platform secret stores).
+- **Two-token split** — tasks that need higher privilege (deploy_worker,
+  provision_route, dev) now read `management_token` and fall back to
+  `api_token`. Runtime ActionMailer delivery keeps using `api_token`.
+  Production: split them. Dev: one token works fine.
+- **Doctor checks token split** and reports a warning for single-token setups.
 - **Per-environment Worker naming**: the default Worker is now
   `cloudflare-email-ingress-#{Rails.env}` instead of a single shared
   `cloudflare-email-ingress`. Critical fix — `cloudflare:email:dev` can no

@@ -58,11 +58,8 @@ module Cloudflare
 
       def secret
         @secret ||= begin
-          credential = nil
-          if defined?(Rails) && Rails.application
-            credential = Rails.application.credentials.dig(:cloudflare, :ingress_secret)
-          end
-          credential || ENV["CLOUDFLARE_INGRESS_SECRET"].to_s
+          require "cloudflare/email/credentials"
+          Cloudflare::Email::Credentials.ingress_secret
         end
       end
     end

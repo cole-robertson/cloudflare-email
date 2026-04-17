@@ -18,8 +18,9 @@ module Cloudflare
       end
 
       def call
-        account_id = Rails.application.credentials.dig(:cloudflare, :account_id) || ENV["CLOUDFLARE_ACCOUNT_ID"]
-        api_token  = Rails.application.credentials.dig(:cloudflare, :api_token)  || ENV["CLOUDFLARE_API_TOKEN"]
+        require "cloudflare/email/credentials"
+        account_id = Cloudflare::Email::Credentials.account_id
+        api_token  = Cloudflare::Email::Credentials.api_token
 
         raise "Missing cloudflare.account_id in credentials" if account_id.to_s.empty?
         raise "Missing cloudflare.api_token in credentials"  if api_token.to_s.empty?

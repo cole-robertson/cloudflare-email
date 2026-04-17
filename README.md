@@ -1,17 +1,9 @@
 # cloudflare-email
 
 A Ruby gem for [Cloudflare's Email Service](https://blog.cloudflare.com/email-for-agents/)
-(public beta, April 2026). Two independent use cases:
-
-- **Send** transactional email from Rails via an `ActionMailer` delivery method
-  (or from plain Ruby via the client directly).
-- **Receive** inbound email via an `ActionMailbox` ingress backed by a shipped
-  Cloudflare Email Worker.
-
-You can use just sending, just receiving, or both. Jump to the path you need:
-
-- [Sending mail only →](#sending-mail)
-- [Receiving mail (and sending) →](#receiving-mail)
+(public beta, April 2026). Send mail from Rails via an `ActionMailer` delivery
+method; receive mail via an `ActionMailbox` ingress backed by a shipped
+Cloudflare Email Worker. Works as a plain Ruby client too.
 
 ```ruby
 # Gemfile
@@ -20,25 +12,36 @@ gem "cloudflare-email"
 
 ---
 
-# Sending mail
+## Two independent paths
 
-For teams that want to send transactional mail from Rails through Cloudflare
-and are not dealing with inbound.
+- **Send only** → skip to [Sending mail](#sending-mail). No Node, no Workers.
+- **Send + Receive** → [Receiving mail](#receiving-mail). Ships a pure-Ruby
+  Worker deployer. **No wrangler. No npm. No dashboard clicking.**
+- Want belt-and-suspenders reply authentication? → [Secure reply-to addresses](#secure-reply-to-addresses).
+
+---
+
+# Sending mail
 
 ## Setup (3 minutes)
 
 ```sh
 bundle add cloudflare-email
 bin/rails generate cloudflare:email:install --no-inbound
-bin/rails credentials:edit
-bin/rails cloudflare:email:doctor
+bin/rails cloudflare:email:doctor              # verify wiring
 TO=you@example.com bin/rails cloudflare:email:send_test
 ```
 
-`--no-inbound` skips the Worker template, ActionMailbox ingress config, and
-mailbox scaffold — just the outbound pieces get installed.
+## Credentials — two options
 
-Add to credentials:
+The gem reads config from **Rails credentials first, then env vars**. Pick
+whichever fits your workflow:
+
+**Option A: Rails credentials** (recommended — encrypted, per-env)
+
+```sh
+bin/rails credentials:edit --environment production
+```
 
 ```yaml
 cloudflare:
@@ -46,14 +49,25 @@ cloudflare:
   api_token:  <email-send-scoped-api-token>
 ```
 
+**Option B: `.env` / environment variables**
+
+```env
+CLOUDFLARE_ACCOUNT_ID=your-account-id
+CLOUDFLARE_API_TOKEN=your-send-scoped-token
+```
+
+Use `dotenv-rails`, `foreman`, your platform's secret store (Fly, Render,
+Heroku, Kamal) — anything that puts them into `ENV`.
+
 ## Dashboard setup (one-time)
 
 1. **API token**: `dash.cloudflare.com/profile/api-tokens` → **Create Token** →
    **Custom Token**. Permission: **Account → Email Sending → Send**. Scope to
    your specific account.
 2. **Sending Domain**: your zone → **Email** → **Email Sending** → **Sending
-   Domains** → **Add Sending Domain**. Use a subdomain (e.g. `mail.yourdomain.com`),
-   not the apex if you have Google Workspace / Outlook there.
+   Domains** → **Add Sending Domain**. Use a subdomain (e.g.
+   `mail.yourdomain.com`), not the apex if you already have Google Workspace
+   there.
 3. **SPF + DMARC** on the apex (DKIM is auto-published by Cloudflare):
    ```
    TXT @       v=spf1 include:_spf.mx.cloudflare.net ~all
@@ -115,115 +129,88 @@ response.message_id # => nil (Cloudflare does not return a message ID)
 
 For full MIME control: `client.send_raw(from:, recipients:, mime_message:)`.
 
-That's it for sending. If you don't need inbound, skip to
-[Observability](#observability), [Errors](#errors), or [Configuration](#configuration).
-
 ---
 
 # Receiving mail
 
-Inbound is more involved than outbound because Cloudflare Email Routing
-delivers mail to an **Email Worker**, not an HTTPS webhook. This gem ships a
-Worker that signs each message with HMAC-SHA256 and POSTs it to a Rails
-`ActionMailbox` ingress it also sets up for you.
+Cloudflare Email Routing delivers inbound mail to an **Email Worker**, not an
+HTTPS webhook — you can't just point it at a URL. This gem ships a Worker
+that signs each message with HMAC-SHA256 and POSTs it to a Rails `ActionMailbox`
+ingress it sets up for you.
 
-The Worker is plain JavaScript, and the gem ships a pure-Ruby deployer that
-talks to Cloudflare's Workers API directly — **you don't need Node, npm, or
-wrangler** to set this up. `wrangler` is supported as an alternative if you
-prefer the Cloudflare-native tooling.
+**No wrangler, npm, or Node required.** The Worker is plain JavaScript; the
+gem ships a pure-Ruby deployer that talks directly to Cloudflare's Workers
+API. `wrangler` is supported as an alternative if you prefer the Cloudflare
+CLI.
 
 ## Setup
 
-Same install command, keep the default `--inbound`:
-
 ```sh
 bundle add cloudflare-email
-bin/rails generate cloudflare:email:install    # interactive
-bin/rails credentials:edit
-bin/rails cloudflare:email:doctor
+bin/rails generate cloudflare:email:install    # interactive; scaffolds everything
+bin/rails credentials:edit                     # fill in the 4 secrets (below)
+bin/rails cloudflare:email:doctor              # verify
+bin/rails cloudflare:email:deploy_worker URL=https://yourapp.com/rails/action_mailbox/cloudflare/inbound_emails
+bin/rails cloudflare:email:provision_route ADDRESS=cole@in.yourdomain.com
 ```
+
+That's it. Zero dashboard clicks once your tokens are created.
 
 The interactive installer:
 
-1. Copies the Worker template into `cloudflare-worker/` and writes the
+1. Copies the Worker template into `cloudflare-worker/` + writes the
    `config/initializers/cloudflare_email.rb` initializer.
-2. **Scaffolds a default `MainMailbox` + catch-all route** (prompt) so inbound
-   mail has somewhere to land on day one (no `RoutingError` on your first
-   test).
-3. **Runs `bin/rails action_mailbox:install`** (prompt) if ActionMailbox is
+2. Scaffolds a default `MainMailbox` + catch-all route (prompt) so inbound
+   mail has somewhere to land on day one.
+3. Runs `bin/rails action_mailbox:install` (prompt) if ActionMailbox is
    missing in the app.
 
-After the installer and `credentials:edit`, **deploy the Worker**:
+## Credentials
 
-```sh
-bin/rails cloudflare:email:deploy_worker URL=https://yourapp.com/rails/action_mailbox/cloudflare/inbound_emails
-```
-
-That's a pure-Ruby call to the Cloudflare API — no Node / npm / wrangler. It:
-
-- Uploads `cloudflare-worker/src/index.js` as a module Worker named
-  `cloudflare-email-ingress`
-- Sets the Worker's `INGRESS_SECRET` from your Rails credentials
-- Sets the Worker's `RAILS_INGRESS_URL` to the value you passed
-
-**API token scope needed**: add `Account → Workers Scripts → Edit` to the
-token (in addition to the `Email Sending → Send` scope used for outbound).
-
-If you prefer wrangler:
-
-```sh
-cd cloudflare-worker
-npm install --legacy-peer-deps
-wrangler secret put INGRESS_SECRET        # paste the value from credentials
-wrangler secret put RAILS_INGRESS_URL     # https://yourapp.com/rails/action_mailbox/cloudflare/inbound_emails
-wrangler deploy
-```
-
-Credentials:
+Same two options as sending (credentials OR `.env`). For inbound you need
+three values plus an ingress secret:
 
 ```yaml
 cloudflare:
-  account_id: <your-cloudflare-account-id>
-  api_token:  <email-send-scoped-api-token>
-  ingress_secret: <generated-by-the-installer>
+  account_id:     <your-cloudflare-account-id>
+  api_token:      <runtime token — Email Sending: Send>
+  management_token: <optional; Workers + Email Routing + Zone Read>
+  ingress_secret: <generated by the installer>
 ```
 
-The `ingress_secret` is the HMAC shared secret between the Worker and Rails.
-Keep it long (≥32 chars, generated for you).
+Or via env vars:
 
-## Provision the Email Routing rule
-
-Once the Worker is deployed, bind your address to it. One command does it:
-
-```sh
-ADDRESS=cole@in.yourdomain.com bin/rails cloudflare:email:provision_route
+```env
+CLOUDFLARE_ACCOUNT_ID=...
+CLOUDFLARE_API_TOKEN=...
+CLOUDFLARE_MANAGEMENT_TOKEN=...   # optional
+CLOUDFLARE_INGRESS_SECRET=...
 ```
 
-This looks up the Cloudflare zone that owns the domain, enables Email
-Routing on it if needed, and creates (or updates) a rule sending mail for
-that address to the env-scoped Worker (`cloudflare-email-ingress-#{Rails.env}`).
-Idempotent — running it twice is safe.
+## Tokens — why two?
 
-**API token scope needed** for this task: add `Zone → Zone → Read` and
-`Zone → Email Routing → Edit` to your token (in addition to `Email Sending:
-Send` and `Workers Scripts: Edit`).
+For best security, split your tokens into runtime and management:
 
-If you'd rather click through the dashboard: `dash.cloudflare.com` → your
-zone → **Email** → **Email Routing** → **Routes** → add a route:
-`cole@in.yourdomain.com` → **Send to a Worker** → select
-`cloudflare-email-ingress-production` (or whichever env).
+- **Runtime** (`api_token`): `Email Sending → Send` only. Lives in the app
+  process at runtime. If leaked, attacker can send spam — that's it.
+- **Management** (`management_token`): `Workers Scripts: Edit`, `Zone: Read`,
+  `Email Routing: Edit`. Used by `deploy_worker`, `provision_route`, and
+  `dev` tasks. **Never loaded by the running Rails app** — set it in your
+  deploy environment only, or as a local `.env` for your laptop.
 
-### ⚠️ Apex vs subdomain
+If only `api_token` is set, management tasks fall back to it. Single-token
+setups are fine for solo devs / small projects; split tokens are strongly
+recommended for production.
 
-**Don't enable Email Routing on the apex** of a domain where colleagues run
-their email on Google Workspace or Outlook — MX records are domain-level, so
-that would route every colleague's mail through Cloudflare first. Use a
-subdomain for agent/automation email instead.
+## Dashboard setup — one step
 
-If you want your *own* real email (`cole@yourdomain.com`) to also reach the
-agent, set up a Google Workspace routing rule that BCCs incoming mail to
-`cole@in.yourdomain.com`. You read mail in Gmail normally AND the agent gets
-a copy.
+Only one dashboard visit needed: create the token(s) at
+`dash.cloudflare.com/profile/api-tokens`. Choose the scopes from the
+[Tokens](#tokens--why-two) table.
+
+Everything else — sending domain, Email Routing enablement, MX records, route
+rules — can be done in the dashboard OR automated from Ruby via the gem's
+rake tasks. See the [rake task reference](#rake-tasks) below.
 
 ## Write your mailbox
 
@@ -260,108 +247,237 @@ tunneling. Run `bin/rails server` in one terminal, then:
 bin/rails cloudflare:email:dev
 ```
 
-That task:
+That task starts a `cloudflared` tunnel, updates your deployed Worker's
+`RAILS_INGRESS_URL` secret to point at it, and ties up the terminal until
+Ctrl-C. Send mail to your routed address; it flows Cloudflare → Worker →
+tunnel → local Rails → your mailbox.
 
-- Starts a `cloudflared` tunnel to your running Rails server
-- Updates the deployed Worker's `RAILS_INGRESS_URL` secret to point at it
-- Tails Worker logs
+Only `cloudflared` required — no wrangler, no Node.
 
-Send mail to your routed address; it flows Cloudflare → Worker → tunnel →
-local Rails → your mailbox. Ctrl-C to stop.
+## Per-environment Worker isolation
 
-Requires `cloudflared` and `wrangler` installed + authenticated.
+The gem names the Worker `cloudflare-email-ingress-#{Rails.env}` by default.
+Dev, staging, and prod deploy as **separate scripts** with separate secrets.
+`bin/rails cloudflare:email:dev` only ever touches `-development`, so spinning
+up a dev tunnel can never break production's inbound.
+
+Deploy per environment:
+
+```sh
+RAILS_ENV=production  bin/rails cloudflare:email:deploy_worker URL=https://app.example.com/rails/action_mailbox/cloudflare/inbound_emails
+RAILS_ENV=staging     bin/rails cloudflare:email:deploy_worker URL=https://staging.example.com/rails/action_mailbox/cloudflare/inbound_emails
+```
+
+Route different addresses to different Workers:
+
+```sh
+RAILS_ENV=production bin/rails cloudflare:email:provision_route ADDRESS=cole@in.yourdomain.com
+RAILS_ENV=staging    bin/rails cloudflare:email:provision_route ADDRESS=cole@staging.in.yourdomain.com
+```
+
+## ⚠️ Apex vs subdomain
+
+**Don't enable Email Routing on the apex** of a domain where colleagues run
+email on Google Workspace or Outlook — MX records are domain-level, so
+that'd route everyone's mail through Cloudflare first. Use a subdomain
+(`in.yourdomain.com`).
+
+If you want your own `cole@yourdomain.com` to also reach the agent, set up a
+Google Workspace routing rule that BCCs incoming mail to
+`cole@in.yourdomain.com`. You read mail in Gmail normally AND the agent
+gets a copy.
 
 ## Rotating the ingress secret
 
 Rotate Worker and Rails together (no overlap window):
 
 1. `bin/rails credentials:edit` — update `cloudflare.ingress_secret`.
-2. `cd cloudflare-worker && wrangler secret put INGRESS_SECRET` (paste the
-   same new value) → `wrangler deploy`.
+2. Re-run `bin/rails cloudflare:email:deploy_worker URL=...` to push the new
+   secret to the Worker + redeploy.
 
 If they disagree, inbound mail bounces with 401 and the sender gets a
 delivery failure (no silent drop).
 
-## How the inbound pipe actually works
+## How inbound flows
 
 ```
 Sender's MTA
-     │
-     ▼  MX lookup resolves to Cloudflare
-Cloudflare Email Routing
-     │  (route matched, action = "Send to Worker")
+     │  MX lookup resolves to Cloudflare
      ▼
-cloudflare-email-ingress Worker  (reads message.raw, signs HMAC)
-     │
-     ▼  POST with Content-Type: message/rfc822
+Cloudflare Email Routing
+     │  (rule matched, action = "Send to Worker")
+     ▼
+cloudflare-email-ingress-{env} Worker  (reads message.raw, HMAC-signs)
+     │  POST with Content-Type: message/rfc822
+     │  + X-CF-Email-Timestamp + X-CF-Email-Signature
+     ▼
 Your Rails app — IngressController
      │  (verifies HMAC, 5-min replay window)
      ▼
 ActionMailbox::InboundEmail.create_and_extract_message_id!
      │
      ▼
-ApplicationMailbox → your Mailbox#process
-```
-
-Headers the Worker sends:
-
-```
-X-CF-Email-Timestamp: <unix seconds>
-X-CF-Email-Signature: <HMAC-SHA256 hex of "{timestamp}.{raw_body}">
+ApplicationMailbox → YourMailbox#process
 ```
 
 If Rails responds non-2xx, the Worker calls `message.setReject` so the sender
-gets a bounce.
+gets a bounce. No silent drops.
 
-## Dev / test / production environments
+---
 
-By default the installer only sets `config.action_mailbox.ingress = :cloudflare`
-in **production.rb**. In development and test, `ActionMailbox.ingress` defaults
-to `nil` and the ingress endpoint returns 404.
+# Secure reply-to addresses
 
-Enable it everywhere with:
+Optional but highly recommended for agent email flows: sign your reply-to
+address with HMAC so the inbound side can prove a reply is legitimate and
+hasn't been forged. Inspired by Cloudflare's
+[`createSecureReplyEmailResolver`](https://developers.cloudflare.com/agents/api-reference/email/)
+from the JS Agents SDK, but stateless (no Durable Object storage needed — we
+encode state directly in the address).
 
-```sh
-bin/rails generate cloudflare:email:install --all-envs
-```
+## Why
 
-Or manually add to any `config/environments/*.rb`:
+Without signing, anyone who can guess your reply address pattern can deliver
+arbitrary "replies" into your agent. With signing:
+
+- Replies carry a cryptographically signed payload (thread ID, user ID, etc.)
+- Signatures can't be forged without the secret
+- Time-boxed with configurable max-age (30 days default)
+- Tampered addresses are rejected with `InvalidToken`
+
+## Outbound
 
 ```ruby
-config.action_mailbox.ingress = :cloudflare
-config.hosts << /.*\.trycloudflare\.com\z/   # if tunneling in dev
+reply_to = Cloudflare::Email::SecureReply.encode(
+  payload: { t: thread.id.to_s },             # keep it tiny (<20 bytes)
+  domain:  "in.yourdomain.com",
+  secret:  Rails.application.credentials.dig(:cloudflare, :reply_secret),
+)
+# => "reply.AIzyonsid...d72af1ef0ee87c2d6fc6be214c65ce69@in.yourdomain.com"
+
+class AgentMailer < ApplicationMailer
+  def ping(thread)
+    mail(
+      to:       thread.user.email,
+      from:     "agent@mail.yourdomain.com",
+      reply_to: reply_to,
+      subject:  "Re: #{thread.title}",
+    ) { |f| f.text { render plain: "How's it going?" } }
+  end
+end
 ```
+
+## Inbound
+
+```ruby
+class MainMailbox < ApplicationMailbox
+  def process
+    recipient = mail.to.first
+
+    if Cloudflare::Email::SecureReply.match?(recipient)
+      payload = Cloudflare::Email::SecureReply.decode(
+        recipient,
+        secret: Rails.application.credentials.dig(:cloudflare, :reply_secret),
+      )
+      Thread.find(payload["t"]).ingest(mail)
+    else
+      # Handle other inbound
+    end
+  rescue Cloudflare::Email::SecureReply::InvalidToken => e
+    Rails.logger.warn("Invalid secure reply: #{e.message} from=#{mail.from&.first}")
+  end
+end
+```
+
+The `match?` heuristic cheaply tests whether an address looks like a
+SecureReply address (so you only attempt decode on candidates).
+
+## Payload size
+
+Local parts must fit within **RFC 5321's 64-char limit** (Cloudflare enforces
+this). The encoding overhead is ~47 chars (local-part prefix + 4-byte binary
+timestamp + 32-char HMAC), leaving roughly **12 bytes for your JSON payload**.
+
+Stick to very short keys and short values:
+
+```ruby
+# Good: ~6 bytes JSON → address fits
+payload: { t: "42" }
+
+# Good: uuid/short hash as string → fits
+payload: { t: "abc123" }
+
+# Too big — raises PayloadTooLarge
+payload: { thread_id: "some-long-uuid", user_id: 12345, action: "reply" }
+```
+
+For larger state, **store server-side and encode only a lookup id**:
+
+```ruby
+token = Thread.create_reply_token!(thread_id: 42, user_id: 7)   # stores in DB, returns short id
+Cloudflare::Email::SecureReply.encode(payload: { t: token }, ...)
+```
+
+## To use this
+
+You'll need a catch-all route on your inbound subdomain (since each reply
+address is unique). One command:
+
+```sh
+DOMAIN=in.yourdomain.com bin/rails cloudflare:email:provision_catchall
+```
+
+And a `reply_secret` in credentials (or `CLOUDFLARE_REPLY_SECRET` env var):
+
+```yaml
+cloudflare:
+  reply_secret: <openssl rand -hex 32>
+```
+
+## Compared to Cloudflare's JS SDK
+
+| | Our SecureReply | CF `createSecureReplyEmailResolver` |
+|---|---|---|
+| Signing | HMAC-SHA256 (128-bit truncated) | HMAC-SHA256 (full) |
+| Timestamp | 4-byte binary, 30-day default max-age | Unix seconds, 30-day default max-age |
+| Carrier | Reply-to address (local part) | Headers + Durable Object lookup |
+| Statefulness | Stateless | Stateful (agent state in DO) |
+| RFC 5321 64-char limit | Yes (payload small) | No (stored in DO) |
+| Works in plain Rails | Yes | Requires Workers + DO |
+
+Same security properties, different mechanism. Use ours when you want
+stateless reply auth in a Rails app; use Cloudflare's when you're already
+on the Agents SDK.
+
+---
+
+# Rake tasks
+
+| Task | What it does |
+|---|---|
+| `cloudflare:email:doctor` | Checks credentials, API token validity, ingress secret strength, token split, `ActionMailbox.ingress = :cloudflare`, delivery method registration. Exit code 1 on failure. |
+| `cloudflare:email:send_test` | One-shot test send. `TO=addr` required; `FROM=addr` auto-detected from verified sending domains. |
+| `cloudflare:email:deploy_worker` | Deploys the Worker + sets both secrets via the Cloudflare API (pure Ruby). `URL=https://...` sets `RAILS_INGRESS_URL`. Targets `cloudflare-email-ingress-#{Rails.env}`. |
+| `cloudflare:email:provision_route` | `ADDRESS=cole@domain.com`: creates (or updates) a Cloudflare Email Routing rule binding that address to the env-scoped Worker. Idempotent. |
+| `cloudflare:email:provision_catchall` | `DOMAIN=in.example.com`: points the zone's catch-all rule at the env-scoped Worker. Essential for SecureReply. |
+| `cloudflare:email:dev` | `cloudflared` tunnel + auto-update of the `-development` Worker's `RAILS_INGRESS_URL`. Inbound dev loop. |
+
+## API token scopes
+
+Create at `dash.cloudflare.com/profile/api-tokens` → **Custom Token**:
+
+| Scope | Used by |
+|---|---|
+| Account → Email Sending → Send | Outbound (runtime token) |
+| Account → Workers Scripts → Edit | `deploy_worker`, `dev` |
+| Zone → Zone → Read | `provision_route`, `provision_catchall` |
+| Zone → Email Routing → Edit | `provision_route`, `provision_catchall` |
+
+**Scope to a single account** (not "All accounts"). Zone Resources should
+cover the domains you'll route to.
 
 ---
 
 # Reference
-
-Applies to both sending and receiving.
-
-## Rake tasks
-
-| Task | What it does |
-|---|---|
-| `cloudflare:email:doctor` | Checks credentials, API token validity, ingress secret strength, `ActionMailbox.ingress = :cloudflare`, delivery method registration. Exit code 1 on failure. |
-| `cloudflare:email:send_test` | One-shot test send. `TO=addr` required; `FROM=addr` auto-detected from verified sending domains if omitted. |
-| `cloudflare:email:deploy_worker` | Deploys the Worker + sets both secrets via the Cloudflare API (pure Ruby, no wrangler/Node). `URL=https://...` sets `RAILS_INGRESS_URL`. Targets the Worker named `cloudflare-email-ingress-#{Rails.env}`. |
-| `cloudflare:email:provision_route` | `ADDRESS=cole@domain.com`: creates (or updates) a Cloudflare Email Routing rule binding that address to the env-scoped Worker. Looks up the zone automatically. Idempotent. |
-| `cloudflare:email:dev` | `cloudflared` tunnel + Worker `RAILS_INGRESS_URL` update via Cloudflare API. Only touches the `-development` Worker. Inbound dev loop. |
-
-## API token scopes
-
-Create at `dash.cloudflare.com/profile/api-tokens` as a **Custom Token**:
-
-- **Account → Email Sending → Send** (required for outbound)
-- **Account → Workers Scripts → Edit** (required to use
-  `cloudflare:email:deploy_worker` or `cloudflare:email:dev` — i.e. to
-  manage the Worker from Rails instead of the dashboard or wrangler)
-- **Zone → Zone → Read** (required for `cloudflare:email:provision_route` —
-  looks up the zone that owns your domain)
-- **Zone → Email Routing → Edit** (required for `cloudflare:email:provision_route` —
-  enables Email Routing and creates rules)
-
-Account Resources: scope to a single account.
 
 ## Configuration
 
@@ -383,8 +499,8 @@ In Rails: `config.action_mailer.cloudflare_settings = { ... }`.
 - Retries on 429, 5xx, and network errors with exponential backoff.
 - `Retry-After` on 429 is honored, capped at `max_retry_after`.
 - **Cloudflare does not accept an idempotency key** and does not return a
-  `message_id`. On a retried 5xx, double-delivery is theoretically possible.
-  Dedupe on your side via the outbound `Message-ID` header if you care.
+  `message_id` in send responses. Dedupe on your side via the outbound
+  `Message-ID` header if you care about exactly-once semantics.
 
 ## Errors
 
@@ -398,6 +514,8 @@ All descend from `Cloudflare::Email::Error`:
 | `RateLimitError` | 429 (retried first) |
 | `ServerError` | 5xx (retried first) |
 | `NetworkError` | Connection failure (retried first) |
+| `SecureReply::InvalidToken` | Signature mismatch, expired, malformed |
+| `SecureReply::PayloadTooLarge` | Payload exceeds 64-char local-part limit |
 
 Each carries `#status` and `#response` (parsed error body).
 
@@ -407,10 +525,7 @@ Subscribe to `ActiveSupport::Notifications`:
 
 ```ruby
 ActiveSupport::Notifications.subscribe("cloudflare_email.send_raw") do |event|
-  Rails.logger.info(
-    "cf_email delivered status=#{event.payload[:status]} " \
-    "duration_ms=#{event.duration.round(1)}"
-  )
+  Rails.logger.info("cf_email status=#{event.payload[:status]} duration=#{event.duration.round(1)}ms")
 end
 
 ActiveSupport::Notifications.subscribe("cloudflare_email.ingress") do |event|
@@ -418,9 +533,7 @@ ActiveSupport::Notifications.subscribe("cloudflare_email.ingress") do |event|
 end
 ```
 
-Events:
-
-| Name | Payload keys |
+| Event | Payload keys |
 |---|---|
 | `cloudflare_email.send` | `:account_id`, `:path`, `:status`, `:message_id` (nil) |
 | `cloudflare_email.send_raw` | `:account_id`, `:path`, `:status`, `:message_id` (nil) |
@@ -442,8 +555,8 @@ bundle exec rake test
 BUNDLE_GEMFILE=gemfiles/rails_7_1.gemfile bundle exec rake test
 BUNDLE_GEMFILE=gemfiles/rails_8_1.gemfile bundle exec rake test
 
-# Worker TypeScript tests
-cd templates/worker && npm install --legacy-peer-deps && npm run typecheck && npm test
+# Worker JavaScript tests
+cd templates/worker && npm install --legacy-peer-deps && npm test
 ```
 
 A full end-to-end trial Rails app lives under `trial/` (not shipped in the gem).
@@ -452,16 +565,13 @@ A full end-to-end trial Rails app lives under `trial/` (not shipped in the gem).
 
 ## Status
 
-**v0.1**. Cloudflare Email Service is itself in public beta. The gem's unit and
-trial tests are verified against live Cloudflare for both outbound and inbound.
+**v0.1**. Cloudflare Email Service is itself in public beta. The gem is
+verified end-to-end against live Cloudflare for outbound, inbound (HMAC
+Worker pipe), Worker deploy (pure-Ruby API), Email Routing provisioning,
+catch-all routing, and SecureReply encoding/decoding. 130 gem unit tests,
+20 trial integration tests, 6 Worker vitest tests — all green.
+
 Issues and PRs welcome.
-
-Deferred for later:
-
-- Subdomain / DNS / Email Routing provisioning via API
-- Mail interceptors (dev sandbox, redirect)
-- Reply-threading helpers matching the JS Agents SDK's `createSecureReplyEmailResolver`
-- Server-side template support (if/when Cloudflare ships templates)
 
 ## License
 

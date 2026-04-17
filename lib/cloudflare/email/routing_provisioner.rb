@@ -124,6 +124,30 @@ module Cloudflare
         Array(result["result"])
       end
 
+      # Point the zone's catch-all rule at our Worker. Catch-all matches any
+      # address on the zone that isn't covered by a more specific rule.
+      # Essential for SecureReply, bounces, aliases.
+      def provision_catch_all(zone_id:, worker_name:)
+        api_request(
+          :put,
+          "/zones/#{zone_id}/email/routing/rules/catch_all",
+          body: {
+            name:     "cloudflare-email gem — catch-all",
+            enabled:  true,
+            matchers: [{ type: "all" }],
+            actions:  [{ type: "worker", value: [worker_name] }],
+          },
+        )
+      end
+
+      def provision_catch_all_for_domain(domain:, worker_name:)
+        zone_id = find_zone_id_for(domain)
+        raise Error.new("No Cloudflare zone found for #{domain}") unless zone_id
+
+        enable_routing_if_needed(zone_id)
+        provision_catch_all(zone_id: zone_id, worker_name: worker_name)
+      end
+
       private
 
       def extract_domain(address)

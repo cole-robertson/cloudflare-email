@@ -29,6 +29,7 @@ module Cloudflare
         check_account_access
         check_sending_domains
         check_ingress_secret
+        check_token_split
         check_action_mailbox_ingress
         check_delivery_method_registered
         summary
@@ -129,8 +130,8 @@ module Cloudflare
       end
 
       def check_ingress_secret
-        secret = Rails.application.credentials.dig(:cloudflare, :ingress_secret).to_s
-        secret = ENV["CLOUDFLARE_INGRESS_SECRET"].to_s if secret.empty?
+        require "cloudflare/email/credentials"
+        secret = Cloudflare::Email::Credentials.ingress_secret
 
         if secret.empty?
           record("Ingress secret", WARN, "not set — inbound will 401 until you configure it")
@@ -138,6 +139,17 @@ module Cloudflare
           record("Ingress secret", WARN, "set but shorter than 32 chars — rotate to a strong random value")
         else
           record("Ingress secret", OK, "set (#{secret.length} chars)")
+        end
+      end
+
+      def check_token_split
+        require "cloudflare/email/credentials"
+        if Cloudflare::Email::Credentials.split_tokens?
+          record("Token split", OK, "separate management_token set (good security posture)")
+        else
+          record("Token split", WARN,
+            "single api_token used for runtime + management — consider splitting via CLOUDFLARE_MANAGEMENT_TOKEN " \
+            "(see README 'Tokens')")
         end
       end
 
@@ -199,12 +211,8 @@ module Cloudflare
       end
 
       def credential(key)
-        from_credentials = Rails.application.credentials.dig(:cloudflare, key).to_s
-        return from_credentials unless from_credentials.empty?
-
-        ENV["CLOUDFLARE_#{key.to_s.upcase}"].to_s
-      rescue StandardError
-        ""
+        require "cloudflare/email/credentials"
+        Cloudflare::Email::Credentials.fetch(key)
       end
 
       def request(method, path, token:)

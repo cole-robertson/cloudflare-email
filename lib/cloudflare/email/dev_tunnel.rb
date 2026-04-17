@@ -21,9 +21,10 @@ module Cloudflare
       def call
         check_prerequisites
 
+        require "cloudflare/email/credentials"
         deployer = Cloudflare::Email::WorkerDeployer.new(
-          account_id: credential(:account_id),
-          api_token:  credential(:api_token),
+          account_id: Cloudflare::Email::Credentials.account_id,
+          api_token:  Cloudflare::Email::Credentials.management_token,
         )
 
         start_tunnel
@@ -53,7 +54,9 @@ module Cloudflare
         unless system("command -v cloudflared >/dev/null 2>&1")
           raise "cloudflared not found in PATH — install from https://developers.cloudflare.com/cloudflared/"
         end
-        if credential(:account_id).empty? || credential(:api_token).empty?
+        require "cloudflare/email/credentials"
+        if Cloudflare::Email::Credentials.account_id.empty? ||
+           Cloudflare::Email::Credentials.management_token.empty?
           raise "Missing cloudflare.account_id or cloudflare.api_token in credentials " \
                 "(or CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_API_TOKEN env vars)"
         end
@@ -89,11 +92,6 @@ module Cloudflare
         @tunnel_log&.close
       end
 
-      def credential(key)
-        from_credentials = Rails.application.credentials.dig(:cloudflare, key).to_s
-        return from_credentials unless from_credentials.empty?
-        ENV["CLOUDFLARE_#{key.to_s.upcase}"].to_s
-      end
     end
   end
 end

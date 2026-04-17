@@ -17,13 +17,14 @@ module Cloudflare
       end
 
       def call
-        account_id     = credential(:account_id)
-        api_token      = credential(:api_token)
-        ingress_secret = credential(:ingress_secret)
+        require "cloudflare/email/credentials"
+        account_id     = Cloudflare::Email::Credentials.account_id
+        api_token      = Cloudflare::Email::Credentials.management_token
+        ingress_secret = Cloudflare::Email::Credentials.ingress_secret
         ingress_url    = @ingress_url || ENV["RAILS_INGRESS_URL"]
 
         raise_missing("cloudflare.account_id") if account_id.empty?
-        raise_missing("cloudflare.api_token")  if api_token.empty?
+        raise_missing("cloudflare.api_token (or cloudflare.management_token)") if api_token.empty?
         raise_missing("cloudflare.ingress_secret — run the installer or set it in credentials") if ingress_secret.empty?
 
         script_path = @script_path || default_script_path
@@ -74,19 +75,8 @@ module Cloudflare
         candidates.find { |p| File.exist?(p) } || candidates.first
       end
 
-      def credential(key)
-        from_credentials =
-          if defined?(Rails) && Rails.application
-            Rails.application.credentials.dig(:cloudflare, key).to_s
-          else
-            ""
-          end
-        return from_credentials unless from_credentials.empty?
-        ENV["CLOUDFLARE_#{key.to_s.upcase}"].to_s
-      end
-
       def raise_missing(what)
-        raise "Missing #{what}. Run `bin/rails credentials:edit` and add it."
+        raise "Missing #{what}. Run `bin/rails credentials:edit` (or set the CLOUDFLARE_* env var)."
       end
     end
   end

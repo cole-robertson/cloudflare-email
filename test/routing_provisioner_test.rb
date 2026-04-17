@@ -146,6 +146,20 @@ class RoutingProvisionerTest < Minitest::Test
     assert_requested(create_stub)
   end
 
+  def test_provision_catch_all
+    stub = stub_request(:put, "https://api.cloudflare.com/client/v4/zones/#{ZONE_ID}/email/routing/rules/catch_all")
+      .with { |req|
+        body = JSON.parse(req.body)
+        assert_equal [{ "type" => "all" }], body["matchers"]
+        assert_equal [{ "type" => "worker", "value" => [WORKER] }], body["actions"]
+        true
+      }
+      .to_return(status: 200, body: JSON.generate("result" => { "id" => "catchall-1" }))
+
+    make.provision_catch_all(zone_id: ZONE_ID, worker_name: WORKER)
+    assert_requested(stub)
+  end
+
   def test_provision_raises_if_no_zone_for_domain
     stub_request(:get, %r{zones\?name=})
       .to_return(status: 200, body: JSON.generate("result" => []))

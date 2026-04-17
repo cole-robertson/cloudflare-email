@@ -27,6 +27,15 @@ namespace :cloudflare do
       )
     end
 
+    desc "Point the zone's catch-all rule at the env-scoped Worker (DOMAIN=in.example.com [WORKER=name])"
+    task provision_catchall: :environment do
+      require "cloudflare/email/provision_catchall_task"
+      exit Cloudflare::Email::ProvisionCatchallTask.call(
+        domain:      ENV["DOMAIN"],
+        worker_name: ENV["WORKER"],
+      )
+    end
+
     desc "Run a cloudflared tunnel pointed at this Rails app, update the Worker's RAILS_INGRESS_URL, and tail logs"
     task dev: :environment do
       require "cloudflare/email/dev_tunnel"
