@@ -6,15 +6,9 @@ module Cloudflare
   module Email
     # Signed outbound Message-IDs for reply authentication.
     #
-    # Why this over SecureReply (the address-based variant):
-    #
-    # - No 64-char RFC 5321 limit on local parts. Message-IDs can be up to
-    #   998 chars, so payloads can be meaningful JSON (not just short ids).
-    # - Doesn't require a catch-all route. Replies come to your normal
-    #   inbound address and you verify via the `In-Reply-To:` header that
-    #   email clients naturally carry through the thread.
-    # - The user-visible reply-to address stays clean (e.g. `agent@in.acme.com`)
-    #   instead of a cryptic `reply.<base64>.<hmac>@in.acme.com`.
+    # Sign the outbound Message-ID with HMAC-SHA256. The recipient's reply
+    # naturally carries the signed id in `In-Reply-To:`, which your mailbox
+    # verifies and decodes to recover the original thread state.
     #
     # This mirrors the spirit of Cloudflare's JS SDK
     # `createSecureReplyEmailResolver` pattern without requiring Durable
@@ -85,7 +79,7 @@ module Cloudflare
           packed = [iat_offset].pack("N") + JSON.generate(payload)
           b64    = base64url_encode(packed)
           # The HMAC covers only the base64 payload — timestamp is IN the
-          # payload, so we don't double-sign it. Same pattern as SecureReply.
+          # packed bytes, so it gets signed along with everything else.
           mac    = hmac(secret, b64)
 
           "#{prefix}.#{b64}.#{mac}@#{domain}"

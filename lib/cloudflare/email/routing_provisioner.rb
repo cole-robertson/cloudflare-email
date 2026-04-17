@@ -126,7 +126,7 @@ module Cloudflare
 
       # Point the zone's catch-all rule at our Worker. Catch-all matches any
       # address on the zone that isn't covered by a more specific rule.
-      # Essential for SecureReply, bounces, aliases.
+      # Useful for bounce handling, dev subdomains, alias routing.
       def provision_catch_all(zone_id:, worker_name:)
         api_request(
           :put,

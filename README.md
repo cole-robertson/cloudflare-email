@@ -17,7 +17,8 @@ gem "cloudflare-email"
 - **Send only** → skip to [Sending mail](#sending-mail). No Node, no Workers.
 - **Send + Receive** → [Receiving mail](#receiving-mail). Ships a pure-Ruby
   Worker deployer. **No wrangler. No npm. No dashboard clicking.**
-- Want belt-and-suspenders reply authentication? → [Secure reply-to addresses](#secure-reply-to-addresses).
+- Want to cryptographically verify replies belong to the right thread? →
+  [Signed replies](#signed-replies).
 
 ---
 
@@ -325,7 +326,7 @@ gets a bounce. No silent drops.
 
 ---
 
-# Secure replies
+# Signed replies
 
 Optional but **highly recommended** for agent email flows: cryptographically
 bind replies to the original thread so the inbound side can prove a reply
@@ -333,24 +334,18 @@ is legitimate and hasn't been forged. Inspired by Cloudflare's
 [`createSecureReplyEmailResolver`](https://developers.cloudflare.com/agents/api-reference/email/)
 from the JS Agents SDK, but stateless — no Durable Object storage needed.
 
-The gem ships **two complementary strategies**. Both use HMAC-SHA256 +
-timestamp + max-age, same cryptographic guarantees.
+**How it works**: sign the outbound `Message-ID:` with HMAC-SHA256. When a
+user replies, their mail client naturally carries the original id into the
+`In-Reply-To:` header. Your mailbox reads + verifies it there, recovers the
+payload (thread id, user id, whatever you encoded), and routes accordingly.
 
-| Strategy | What gets signed | Pros | Use when |
-|---|---|---|---|
-| **`SecureMessageId`** (preferred) | Outbound `Message-ID:` header; reply carries it in `In-Reply-To:` | No size limit, clean reply-to address, no catch-all route required | Normal agent email where recipients use a regular mail client that preserves threading |
-| `SecureReply` | Reply-to address local part | Works even if threading headers get stripped | Auto-forwarded mail, bounces, systems that rewrite `In-Reply-To:` |
+- HMAC-SHA256, 30-day default max-age (configurable)
+- Stateless — no DB row to look up, no Durable Object
+- No catch-all route required — replies come to your normal inbound address
+- User-visible reply-to address stays clean (`agent@in.yourdomain.com`)
+- No size constraint on payloads — Message-IDs can be ~900 chars
 
-Pick `SecureMessageId` unless you have a specific reason not to.
-
-## `SecureMessageId` (preferred)
-
-Sign the outbound `Message-ID:` with HMAC. When a user replies, their mail
-client puts the original ID into the `In-Reply-To:` header — your mailbox
-reads + verifies it there. No catch-all needed, no size constraint, clean
-user-visible reply-to address.
-
-### Outbound
+## Outbound
 
 ```ruby
 class AgentMailer < ApplicationMailer
@@ -376,7 +371,7 @@ class AgentMailer < ApplicationMailer
 end
 ```
 
-### Inbound
+## Inbound
 
 ```ruby
 class AgentMailbox < ApplicationMailbox
@@ -396,123 +391,29 @@ end
 ```
 
 Route replies to `agent@in.yourdomain.com` normally (`provision_route`).
-No catch-all needed — the signed state rides in the Message-ID, not the
-recipient address.
+The signed state rides in the Message-ID, not the recipient address.
 
-## `SecureReply` (fallback, address-based)
+## Setup
 
-Encode state into the reply-to address itself. Use this when you can't rely
-on `In-Reply-To:` (auto-forwarders, bots, clients that strip threading).
-
-## Why
-
-Without signing, anyone who can guess your reply address pattern can deliver
-arbitrary "replies" into your agent. With signing:
-
-- Replies carry a cryptographically signed payload (thread ID, user ID, etc.)
-- Signatures can't be forged without the secret
-- Time-boxed with configurable max-age (30 days default)
-- Tampered addresses are rejected with `InvalidToken`
-
-## Outbound
-
-```ruby
-reply_to = Cloudflare::Email::SecureReply.encode(
-  payload: { t: thread.id.to_s },             # keep it tiny (<20 bytes)
-  domain:  "in.yourdomain.com",
-  secret:  Rails.application.credentials.dig(:cloudflare, :reply_secret),
-)
-# => "reply.AIzyonsid...d72af1ef0ee87c2d6fc6be214c65ce69@in.yourdomain.com"
-
-class AgentMailer < ApplicationMailer
-  def ping(thread)
-    mail(
-      to:       thread.user.email,
-      from:     "agent@mail.yourdomain.com",
-      reply_to: reply_to,
-      subject:  "Re: #{thread.title}",
-    ) { |f| f.text { render plain: "How's it going?" } }
-  end
-end
-```
-
-## Inbound
-
-```ruby
-class MainMailbox < ApplicationMailbox
-  def process
-    recipient = mail.to.first
-
-    if Cloudflare::Email::SecureReply.match?(recipient)
-      payload = Cloudflare::Email::SecureReply.decode(
-        recipient,
-        secret: Rails.application.credentials.dig(:cloudflare, :reply_secret),
-      )
-      Thread.find(payload["t"]).ingest(mail)
-    else
-      # Handle other inbound
-    end
-  rescue Cloudflare::Email::SecureReply::InvalidToken => e
-    Rails.logger.warn("Invalid secure reply: #{e.message} from=#{mail.from&.first}")
-  end
-end
-```
-
-The `match?` heuristic cheaply tests whether an address looks like a
-SecureReply address (so you only attempt decode on candidates).
-
-## Payload size
-
-Local parts must fit within **RFC 5321's 64-char limit** (Cloudflare enforces
-this). The encoding overhead is ~47 chars (local-part prefix + 4-byte binary
-timestamp + 32-char HMAC), leaving roughly **12 bytes for your JSON payload**.
-
-Stick to very short keys and short values:
-
-```ruby
-# Good: ~6 bytes JSON → address fits
-payload: { t: "42" }
-
-# Good: uuid/short hash as string → fits
-payload: { t: "abc123" }
-
-# Too big — raises PayloadTooLarge
-payload: { thread_id: "some-long-uuid", user_id: 12345, action: "reply" }
-```
-
-For larger state, **store server-side and encode only a lookup id**:
-
-```ruby
-token = Thread.create_reply_token!(thread_id: 42, user_id: 7)   # stores in DB, returns short id
-Cloudflare::Email::SecureReply.encode(payload: { t: token }, ...)
-```
-
-## To use this
-
-You'll need a catch-all route on your inbound subdomain (since each reply
-address is unique). One command:
-
-```sh
-DOMAIN=in.yourdomain.com bin/rails cloudflare:email:provision_catchall
-```
-
-And a `reply_secret` in credentials (or `CLOUDFLARE_REPLY_SECRET` env var):
+Add a reply secret to credentials:
 
 ```yaml
 cloudflare:
   reply_secret: <openssl rand -hex 32>
 ```
 
+(Or `CLOUDFLARE_REPLY_SECRET` in your env.)
+
+That's it. Use the helpers in your mailer + mailbox as shown above.
+
 ## Compared to Cloudflare's JS SDK
 
-| | Our SecureMessageId | Our SecureReply | CF `createSecureReplyEmailResolver` |
-|---|---|---|---|
-| Signing | HMAC-SHA256 (full 64-char) | HMAC-SHA256 (128-bit truncated) | HMAC-SHA256 (full) |
-| Carrier | `Message-ID:` → `In-Reply-To:` | Reply-to address | Headers + Durable Object lookup |
-| Statefulness | Stateless | Stateless | Stateful (DO storage) |
-| Payload size | Large (~900 chars) | Tiny (~12 bytes) | No limit (in DO) |
-| Catch-all needed | No | Yes | N/A |
-| Works in plain Rails | Yes | Yes | Requires Workers + DO |
+| | Our `SecureMessageId` | CF `createSecureReplyEmailResolver` |
+|---|---|---|
+| Signing | HMAC-SHA256 (full 64-char hex) | HMAC-SHA256 (full) |
+| Carrier | `Message-ID:` → `In-Reply-To:` | Headers + Durable Object lookup |
+| Statefulness | Stateless | Stateful (DO storage) |
+| Works in plain Rails | Yes | Requires Workers + DO |
 
 Same security properties (HMAC-SHA256, time-boxed with max-age), different
 mechanism. `SecureMessageId` is the idiomatic Rails choice — stateless,
@@ -528,7 +429,7 @@ size-unconstrained, and matches email threading natively.
 | `cloudflare:email:send_test` | One-shot test send. `TO=addr` required; `FROM=addr` auto-detected from verified sending domains. |
 | `cloudflare:email:deploy_worker` | Deploys the Worker + sets both secrets via the Cloudflare API (pure Ruby). `URL=https://...` sets `RAILS_INGRESS_URL`. Targets `cloudflare-email-ingress-#{Rails.env}`. |
 | `cloudflare:email:provision_route` | `ADDRESS=cole@domain.com`: creates (or updates) a Cloudflare Email Routing rule binding that address to the env-scoped Worker. Idempotent. |
-| `cloudflare:email:provision_catchall` | `DOMAIN=in.example.com`: points the zone's catch-all rule at the env-scoped Worker. Essential for SecureReply. |
+| `cloudflare:email:provision_catchall` | `DOMAIN=in.example.com`: points the zone's catch-all rule at the env-scoped Worker. Useful for bounce handling and dev subdomains. |
 | `cloudflare:email:dev` | `cloudflared` tunnel + auto-update of the `-development` Worker's `RAILS_INGRESS_URL`. Inbound dev loop. |
 
 ## API token scopes
@@ -584,8 +485,7 @@ All descend from `Cloudflare::Email::Error`:
 | `RateLimitError` | 429 (retried first) |
 | `ServerError` | 5xx (retried first) |
 | `NetworkError` | Connection failure (retried first) |
-| `SecureReply::InvalidToken` | Signature mismatch, expired, malformed |
-| `SecureReply::PayloadTooLarge` | Payload exceeds 64-char local-part limit |
+| `SecureMessageId::InvalidToken` | Signature mismatch, expired, malformed |
 
 Each carries `#status` and `#response` (parsed error body).
 
@@ -638,7 +538,7 @@ A full end-to-end trial Rails app lives under `trial/` (not shipped in the gem).
 **v0.1**. Cloudflare Email Service is itself in public beta. The gem is
 verified end-to-end against live Cloudflare for outbound, inbound (HMAC
 Worker pipe), Worker deploy (pure-Ruby API), Email Routing provisioning,
-catch-all routing, and SecureReply encoding/decoding. 130 gem unit tests,
+catch-all routing, and SecureMessageId signing/verification. 130+ gem unit tests,
 20 trial integration tests, 6 Worker vitest tests — all green.
 
 Issues and PRs welcome.

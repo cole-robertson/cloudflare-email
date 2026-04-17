@@ -2,24 +2,17 @@
 
 ## Unreleased
 
-- **`Cloudflare::Email::SecureMessageId`** (preferred over SecureReply) —
-  sign the outbound `Message-ID:` with HMAC-SHA256. The recipient's reply
-  naturally carries the signed id in `In-Reply-To:`, which the inbound
-  mailbox reads and verifies. Advantages over address-based SecureReply:
-  no 64-char limit (payloads can be ~900 chars), no catch-all rule needed,
-  and the user-visible reply-to address stays clean. Verified end-to-end
-  against live Cloudflare with a 191-char Message-ID carrying a 4-field
-  JSON payload.
-- **`Cloudflare::Email::SecureReply`** — HMAC-signed, time-boxed reply-to
-  addresses. Inspired by Cloudflare's Agents SDK `createSecureReplyEmailResolver`
-  but stateless (no Durable Object storage). `encode(payload:, domain:, secret:)`
-  returns a `reply.<base64>.<hmac>@domain` address; `decode(address, secret:)`
-  returns the original payload or raises `InvalidToken`. 30-day default
-  max-age, 128-bit truncated HMAC-SHA256 to fit RFC 5321's 64-char local-part
-  limit. Verified end-to-end against live Cloudflare.
+- **`Cloudflare::Email::SecureMessageId`** — sign the outbound `Message-ID:`
+  with HMAC-SHA256. The recipient's reply naturally carries the signed id
+  in `In-Reply-To:`, which the inbound mailbox reads and verifies. Inspired
+  by Cloudflare's Agents SDK `createSecureReplyEmailResolver` but stateless
+  (no Durable Object storage). Payloads can carry meaningful JSON (thread
+  id + user id + action) since Message-IDs don't hit the 64-char local-part
+  limit. 30-day default max-age. Verified end-to-end against live Cloudflare
+  with a 191-char signed Message-ID carrying a 4-field JSON payload.
 - **`bin/rails cloudflare:email:provision_catchall DOMAIN=...`** — one-shot
-  catch-all rule setup for a zone. Essential for SecureReply where every
-  reply address is unique.
+  catch-all rule setup for a zone. Useful for bounce handling, dev
+  subdomains, and alias routing.
 - **`Cloudflare::Email::Credentials`** — unified credential lookup: Rails
   credentials first, then `CLOUDFLARE_*` env vars. Supports both workflows
   (credentials.yml.enc AND `.env` / platform secret stores).

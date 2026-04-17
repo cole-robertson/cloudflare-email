@@ -6,8 +6,8 @@ module Cloudflare
   module Email
     # Implementation for `bin/rails cloudflare:email:provision_catchall`.
     # Configures the zone's catch-all rule to send every otherwise-unrouted
-    # address to the env-scoped ingress Worker. Essential for SecureReply
-    # reply addresses (where each address is unique) and bounces.
+    # address to the env-scoped ingress Worker. Useful for bounce handling,
+    # dev subdomains, and any flow where the recipient address is dynamic.
     #
     #   DOMAIN=in.example.com bin/rails cloudflare:email:provision_catchall
     class ProvisionCatchallTask

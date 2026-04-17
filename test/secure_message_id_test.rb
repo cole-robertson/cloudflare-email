@@ -21,7 +21,7 @@ class SecureMessageIdTest < Minitest::Test
   end
 
   def test_no_size_constraint
-    # 200-char payload would never fit SecureReply; here it's fine.
+    # 200-char payload in a Message-ID — no local-part size ceiling here.
     big = { "state" => "x" * 200 }
     id  = encode_fixture(big)
     local = id.split("@").first
