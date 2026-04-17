@@ -30,7 +30,7 @@ jobs:
       - run: bundle exec rake test
 
   worker:
-    name: Cloudflare Worker (TypeScript)
+    name: Cloudflare Worker (JavaScript)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -41,5 +41,4 @@ jobs:
         with:
           node-version: "20"
       - run: npm install --legacy-peer-deps
-      - run: npm run typecheck
       - run: npm test
