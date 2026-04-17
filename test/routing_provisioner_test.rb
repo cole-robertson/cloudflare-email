@@ -73,6 +73,18 @@ class RoutingProvisionerTest < Minitest::Test
     assert_requested(stub)
   end
 
+  def test_enable_routing_silently_skips_on_403
+    # Some scoped tokens can't read routing settings. We attempt enable
+    # optimistically but don't fail the whole provision flow on 403.
+    stub_request(:get, "https://api.cloudflare.com/client/v4/zones/#{ZONE_ID}/email/routing")
+      .to_return(status: 403, body: JSON.generate("errors" => [{ "message" => "Authentication error" }]))
+    stub_request(:post, "https://api.cloudflare.com/client/v4/zones/#{ZONE_ID}/email/routing/enable")
+      .to_return(status: 403, body: JSON.generate("errors" => [{ "message" => "Authentication error" }]))
+
+    # No exception raised
+    make.enable_routing_if_needed(ZONE_ID)
+  end
+
   def test_upsert_creates_rule_when_missing
     stub_request(:get, "https://api.cloudflare.com/client/v4/zones/#{ZONE_ID}/email/routing/rules?per_page=50")
       .to_return(status: 200, body: JSON.generate("result" => []))

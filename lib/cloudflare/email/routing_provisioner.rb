@@ -59,18 +59,25 @@ module Cloudflare
       end
 
       def enable_routing_if_needed(zone_id)
+        # This endpoint requires the "Email Routing Settings" permission group,
+        # which most scoped tokens don't carry. If we can read the setting,
+        # enable when off. If we can't (403), assume the user enabled routing
+        # via the dashboard when they added the subdomain — the subsequent
+        # rule create will fail with a clear error if not.
         current = raw_api_request(:get, "/zones/#{zone_id}/email/routing")
         status  = current.code.to_i
-        body    = parse(current.body)
 
         case status
         when 200
+          body    = parse(current.body)
           enabled = body.dig("result", "enabled")
-          return if enabled
-          api_request(:post, "/zones/#{zone_id}/email/routing/enable")
-        when 404, 409
-          # Not enabled yet — enable it.
-          api_request(:post, "/zones/#{zone_id}/email/routing/enable")
+          api_request(:post, "/zones/#{zone_id}/email/routing/enable") unless enabled
+        when 403, 404
+          # Either the token can't read settings or routing isn't set up.
+          # Try to enable optimistically; ignore failure (rule create will
+          # surface a precise error if routing is actually off).
+          attempt = raw_api_request(:post, "/zones/#{zone_id}/email/routing/enable")
+          # Don't fail here even if this also 403s — move on to rule creation.
         else
           handle!(current, "GET /zones/#{zone_id}/email/routing")
         end
