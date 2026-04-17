@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  ruby:
+    name: "Ruby ${{ matrix.ruby }} × Rails ${{ matrix.rails }}"
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby: ["3.2", "3.3", "3.4"]
+        rails: ["7_1", "7_2", "8_0", "8_1"]
+        exclude:
+          - ruby: "3.2"
+            rails: "8_0"
+          - ruby: "3.2"
+            rails: "8_1"
+    env:
+      BUNDLE_GEMFILE: "${{ github.workspace }}/gemfiles/rails_${{ matrix.rails }}.gemfile"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "${{ matrix.ruby }}"
+          bundler-cache: true
+      - run: bundle exec rake test
+
+  worker:
+    name: Cloudflare Worker (TypeScript)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: templates/worker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm install --legacy-peer-deps
+      - run: npm run typecheck
+      - run: npm test

@@ -1,0 +1,10 @@
+name = "cloudflare-email-ingress"
+main = "src/index.ts"
+compatibility_date = "2026-04-01"
+
+# Required secrets (set via `wrangler secret put`):
+#   RAILS_INGRESS_URL  - https://your-rails-app.example.com/rails/action_mailbox/cloudflare/inbound_emails
+#   INGRESS_SECRET     - shared secret matching cloudflare.ingress_secret in Rails credentials
+
+# After deploying, in the Cloudflare dashboard:
+#   Email Routing -> Routes -> "Send to a Worker" -> select cloudflare-email-ingress
