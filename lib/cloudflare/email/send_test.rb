@@ -1,70 +1,55 @@
+require "cloudflare/email/task_base"
 require "cloudflare/email/client"
 
 module Cloudflare
   module Email
-    # One-shot test send for `bin/rails cloudflare:email:send_test`.
-    #
-    #   TO=you@example.com bin/rails cloudflare:email:send_test
-    #   TO=you@example.com FROM=agent@acme.com bin/rails cloudflare:email:send_test
-    class SendTest
+    # `bin/rails cloudflare:email:send_test TO=... [FROM=...]` — one-shot
+    # test send via the current Cloudflare Email config.
+    class SendTest < TaskBase
       def self.call(to:, from: nil, io: $stdout)
-        new(to: to, from: from, io: io).call
+        new(io: io, to: to, from: from).call
       end
 
-      def initialize(to:, from: nil, io: $stdout)
-        @to   = to
-        @from = from
-        @io   = io
-      end
+      protected
 
-      def call
-        require "cloudflare/email/credentials"
-        account_id = Cloudflare::Email::Credentials.account_id
-        api_token  = Cloudflare::Email::Credentials.api_token
+      def run
+        require_value!(account_id, "cloudflare.account_id")
+        require_value!(api_token,  "cloudflare.api_token")
+        require_value!(opts[:to],  "TO=recipient@example.com")
 
-        raise "Missing cloudflare.account_id in credentials" if account_id.to_s.empty?
-        raise "Missing cloudflare.api_token in credentials"  if api_token.to_s.empty?
-        raise "Missing TO= (recipient)"                      if @to.to_s.empty?
+        sender = opts[:from] || infer_from
+        raise "Missing FROM= and couldn't infer from verified sending domains" if sender.to_s.empty?
 
-        from = @from || infer_from(api_token, account_id)
-        raise "Missing FROM= (sender) and could not infer from verified sending domains" if from.to_s.empty?
-
-        @io.puts "Sending test email:"
-        @io.puts "  from: #{from}"
-        @io.puts "  to:   #{@to}"
-        @io.puts ""
+        say "Sending test email:"
+        say "  from: #{sender}"
+        say "  to:   #{opts[:to]}"
+        say ""
 
         client = Cloudflare::Email::Client.new(
-          account_id: account_id,
-          api_token:  api_token,
-          retries:    0,
+          account_id: account_id, api_token: api_token, retries: 0,
         )
 
         response = client.send(
-          from:    from,
-          to:      @to,
+          from:    sender,
+          to:      opts[:to],
           subject: "[cloudflare-email test] #{Time.now.iso8601}",
           text:    "This is a test send from the cloudflare-email gem doctor.",
           html:    "<p>This is a test send from the <code>cloudflare-email</code> gem doctor.</p>" \
                    "<p>Sent at <strong>#{Time.now.iso8601}</strong>.</p>",
         )
 
-        @io.puts "  success:   #{response.success?}"
-        @io.puts "  delivered: #{response.delivered.inspect}"
-        @io.puts "  queued:    #{response.queued.inspect}" if response.queued.any?
-        @io.puts "  bounces:   #{response.permanent_bounces.inspect}" if response.permanent_bounces.any?
-        @io.puts ""
-        response.success? ? 0 : 1
-      rescue Cloudflare::Email::Error => e
-        @io.puts "  ERROR: #{e.class}: #{e.message}"
-        @io.puts "  status: #{e.status}"
-        @io.puts "  response: #{e.response.inspect}"
-        1
+        say "  success:   #{response.success?}"
+        say "  delivered: #{response.delivered.inspect}"
+        say "  queued:    #{response.queued.inspect}"           if response.queued.any?
+        say "  bounces:   #{response.permanent_bounces.inspect}" if response.permanent_bounces.any?
       end
 
       private
 
-      def infer_from(api_token, account_id)
+      def infer_from
+        require "net/http"
+        require "json"
+
         uri  = URI.parse("https://api.cloudflare.com/client/v4/accounts/#{account_id}/email/sending/domains")
         http = Net::HTTP.new(uri.host, uri.port)
         http.use_ssl = true
@@ -73,11 +58,10 @@ module Cloudflare
 
         req = Net::HTTP::Get.new(uri.request_uri)
         req["Authorization"] = "Bearer #{api_token}"
-
         response = http.request(req)
         return nil unless response.code.to_i.between?(200, 299)
 
-        domains = JSON.parse(response.body).dig("result") || []
+        domains  = JSON.parse(response.body).dig("result") || []
         verified = domains.find { |d| d["verified"] == true || d["status"] == "verified" }
         return nil unless verified
 

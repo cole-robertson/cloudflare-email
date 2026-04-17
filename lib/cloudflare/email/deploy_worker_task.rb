@@ -1,82 +1,61 @@
+require "cloudflare/email/task_base"
 require "cloudflare/email/worker_deployer"
 
 module Cloudflare
   module Email
-    # Implementation for `bin/rails cloudflare:email:deploy_worker`.
-    # Uploads the Worker script + both required secrets via the Cloudflare API.
-    # No wrangler / Node / npm required.
-    class DeployWorkerTask
+    # `bin/rails cloudflare:email:deploy_worker` — uploads the Worker
+    # script + both secrets via the Cloudflare API. No wrangler required.
+    class DeployWorkerTask < TaskBase
       def self.call(script_path: nil, ingress_url: nil, io: $stdout)
-        new(script_path: script_path, ingress_url: ingress_url, io: io).call
+        new(io: io, script_path: script_path, ingress_url: ingress_url).call
       end
 
-      def initialize(script_path: nil, ingress_url: nil, io: $stdout)
-        @script_path = script_path
-        @ingress_url = ingress_url
-        @io          = io
-      end
+      protected
 
-      def call
-        require "cloudflare/email/credentials"
-        account_id     = Cloudflare::Email::Credentials.account_id
-        api_token      = Cloudflare::Email::Credentials.management_token
-        ingress_secret = Cloudflare::Email::Credentials.ingress_secret
-        ingress_url    = @ingress_url || ENV["RAILS_INGRESS_URL"]
+      def run
+        require_value!(account_id,     "cloudflare.account_id")
+        require_value!(management_token, "cloudflare.api_token (or cloudflare.management_token)")
+        require_value!(ingress_secret, "cloudflare.ingress_secret — run the installer first")
 
-        raise_missing("cloudflare.account_id") if account_id.empty?
-        raise_missing("cloudflare.api_token (or cloudflare.management_token)") if api_token.empty?
-        raise_missing("cloudflare.ingress_secret — run the installer or set it in credentials") if ingress_secret.empty?
-
-        script_path = @script_path || default_script_path
-        unless File.exist?(script_path)
-          raise "Worker script not found at #{script_path} — re-run " \
-                "`bin/rails g cloudflare:email:install` to scaffold it"
-        end
+        path = script_path
+        raise "Worker script not found at #{path} — re-run `bin/rails g cloudflare:email:install`" unless File.exist?(path)
 
         deployer = Cloudflare::Email::WorkerDeployer.new(
-          account_id: account_id, api_token: api_token,
+          account_id: account_id, api_token: management_token,
         )
 
-        @io.puts "  Deploying Worker '#{deployer.script_name}'..."
-        deployer.deploy(script_path: script_path)
-        @io.puts "  ✓ Worker script deployed"
+        say "  Deploying Worker '#{deployer.script_name}'..."
+        deployer.deploy(script_path: path)
+        say "  ✓ Worker script deployed"
 
         deployer.put_secret("INGRESS_SECRET", ingress_secret)
-        @io.puts "  ✓ INGRESS_SECRET set"
+        say "  ✓ INGRESS_SECRET set"
 
-        if ingress_url.to_s.empty?
-          @io.puts "  (skipping RAILS_INGRESS_URL — pass URL=https://... or set RAILS_INGRESS_URL env var)"
+        if url.to_s.empty?
+          say "  (skipping RAILS_INGRESS_URL — pass URL=https://... or set RAILS_INGRESS_URL env var)"
         else
-          deployer.put_secret("RAILS_INGRESS_URL", ingress_url)
-          @io.puts "  ✓ RAILS_INGRESS_URL set to #{ingress_url}"
+          deployer.put_secret("RAILS_INGRESS_URL", url)
+          say "  ✓ RAILS_INGRESS_URL set to #{url}"
         end
 
-        @io.puts ""
-        @io.puts "  Next: in Cloudflare dashboard → Email → Email Routing → Routes,"
-        @io.puts "  route your address to Worker '#{deployer.script_name}'."
-        0
-      rescue Cloudflare::Email::Error => e
-        @io.puts "  ERROR: #{e.message}"
-        @io.puts "  Status: #{e.status}"
-        @io.puts "  (Check that your API token has Account → Workers Scripts → Edit permission.)"
-        1
-      rescue => e
-        @io.puts "  ERROR: #{e.message}"
-        1
+        say ""
+        say "  Next: route an address to Worker '#{deployer.script_name}' — either via"
+        say "  `bin/rails cloudflare:email:provision_route ADDRESS=...` or in the dashboard."
       end
 
       private
 
-      def default_script_path
-        candidates = [
-          "cloudflare-worker/src/index.js",
-          "cloudflare-worker/src/index.ts",
-        ]
-        candidates.find { |p| File.exist?(p) } || candidates.first
+      def script_path
+        opts[:script_path] || default_script_path
       end
 
-      def raise_missing(what)
-        raise "Missing #{what}. Run `bin/rails credentials:edit` (or set the CLOUDFLARE_* env var)."
+      def url
+        opts[:ingress_url] || ENV["RAILS_INGRESS_URL"].to_s
+      end
+
+      def default_script_path
+        candidates = ["cloudflare-worker/src/index.js", "cloudflare-worker/src/index.ts"]
+        candidates.find { |p| File.exist?(p) } || candidates.first
       end
     end
   end
