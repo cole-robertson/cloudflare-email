@@ -325,14 +325,84 @@ gets a bounce. No silent drops.
 
 ---
 
-# Secure reply-to addresses
+# Secure replies
 
-Optional but highly recommended for agent email flows: sign your reply-to
-address with HMAC so the inbound side can prove a reply is legitimate and
-hasn't been forged. Inspired by Cloudflare's
+Optional but **highly recommended** for agent email flows: cryptographically
+bind replies to the original thread so the inbound side can prove a reply
+is legitimate and hasn't been forged. Inspired by Cloudflare's
 [`createSecureReplyEmailResolver`](https://developers.cloudflare.com/agents/api-reference/email/)
-from the JS Agents SDK, but stateless (no Durable Object storage needed — we
-encode state directly in the address).
+from the JS Agents SDK, but stateless — no Durable Object storage needed.
+
+The gem ships **two complementary strategies**. Both use HMAC-SHA256 +
+timestamp + max-age, same cryptographic guarantees.
+
+| Strategy | What gets signed | Pros | Use when |
+|---|---|---|---|
+| **`SecureMessageId`** (preferred) | Outbound `Message-ID:` header; reply carries it in `In-Reply-To:` | No size limit, clean reply-to address, no catch-all route required | Normal agent email where recipients use a regular mail client that preserves threading |
+| `SecureReply` | Reply-to address local part | Works even if threading headers get stripped | Auto-forwarded mail, bounces, systems that rewrite `In-Reply-To:` |
+
+Pick `SecureMessageId` unless you have a specific reason not to.
+
+## `SecureMessageId` (preferred)
+
+Sign the outbound `Message-ID:` with HMAC. When a user replies, their mail
+client puts the original ID into the `In-Reply-To:` header — your mailbox
+reads + verifies it there. No catch-all needed, no size constraint, clean
+user-visible reply-to address.
+
+### Outbound
+
+```ruby
+class AgentMailer < ApplicationMailer
+  def ping(thread)
+    signed_id = Cloudflare::Email::SecureMessageId.encode(
+      payload: {
+        thread_id: thread.id,
+        user_id:   thread.user_id,
+        kind:      "ping",
+      },
+      domain: "mail.yourdomain.com",
+      secret: Rails.application.credentials.dig(:cloudflare, :reply_secret),
+    )
+
+    mail(
+      to:         thread.user.email,
+      from:       "agent@mail.yourdomain.com",
+      reply_to:   "agent@in.yourdomain.com",   # clean, routable address
+      subject:    "Re: #{thread.title}",
+      message_id: signed_id,                    # sign the Message-ID
+    ) { |f| f.text { render plain: "..." } }
+  end
+end
+```
+
+### Inbound
+
+```ruby
+class AgentMailbox < ApplicationMailbox
+  def process
+    ref = mail.in_reply_to || Array(mail.references).first
+    if ref && Cloudflare::Email::SecureMessageId.match?(ref)
+      payload = Cloudflare::Email::SecureMessageId.decode(
+        ref,
+        secret: Rails.application.credentials.dig(:cloudflare, :reply_secret),
+      )
+      Thread.find(payload["thread_id"]).ingest(mail)
+    end
+  rescue Cloudflare::Email::SecureMessageId::InvalidToken => e
+    Rails.logger.warn("Invalid signed reply: #{e.message}")
+  end
+end
+```
+
+Route replies to `agent@in.yourdomain.com` normally (`provision_route`).
+No catch-all needed — the signed state rides in the Message-ID, not the
+recipient address.
+
+## `SecureReply` (fallback, address-based)
+
+Encode state into the reply-to address itself. Use this when you can't rely
+on `In-Reply-To:` (auto-forwarders, bots, clients that strip threading).
 
 ## Why
 
@@ -435,18 +505,18 @@ cloudflare:
 
 ## Compared to Cloudflare's JS SDK
 
-| | Our SecureReply | CF `createSecureReplyEmailResolver` |
-|---|---|---|
-| Signing | HMAC-SHA256 (128-bit truncated) | HMAC-SHA256 (full) |
-| Timestamp | 4-byte binary, 30-day default max-age | Unix seconds, 30-day default max-age |
-| Carrier | Reply-to address (local part) | Headers + Durable Object lookup |
-| Statefulness | Stateless | Stateful (agent state in DO) |
-| RFC 5321 64-char limit | Yes (payload small) | No (stored in DO) |
-| Works in plain Rails | Yes | Requires Workers + DO |
+| | Our SecureMessageId | Our SecureReply | CF `createSecureReplyEmailResolver` |
+|---|---|---|---|
+| Signing | HMAC-SHA256 (full 64-char) | HMAC-SHA256 (128-bit truncated) | HMAC-SHA256 (full) |
+| Carrier | `Message-ID:` → `In-Reply-To:` | Reply-to address | Headers + Durable Object lookup |
+| Statefulness | Stateless | Stateless | Stateful (DO storage) |
+| Payload size | Large (~900 chars) | Tiny (~12 bytes) | No limit (in DO) |
+| Catch-all needed | No | Yes | N/A |
+| Works in plain Rails | Yes | Yes | Requires Workers + DO |
 
-Same security properties, different mechanism. Use ours when you want
-stateless reply auth in a Rails app; use Cloudflare's when you're already
-on the Agents SDK.
+Same security properties (HMAC-SHA256, time-boxed with max-age), different
+mechanism. `SecureMessageId` is the idiomatic Rails choice — stateless,
+size-unconstrained, and matches email threading natively.
 
 ---
 

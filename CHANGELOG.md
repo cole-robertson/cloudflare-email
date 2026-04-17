@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **`Cloudflare::Email::SecureMessageId`** (preferred over SecureReply) —
+  sign the outbound `Message-ID:` with HMAC-SHA256. The recipient's reply
+  naturally carries the signed id in `In-Reply-To:`, which the inbound
+  mailbox reads and verifies. Advantages over address-based SecureReply:
+  no 64-char limit (payloads can be ~900 chars), no catch-all rule needed,
+  and the user-visible reply-to address stays clean. Verified end-to-end
+  against live Cloudflare with a 191-char Message-ID carrying a 4-field
+  JSON payload.
 - **`Cloudflare::Email::SecureReply`** — HMAC-signed, time-boxed reply-to
   addresses. Inspired by Cloudflare's Agents SDK `createSecureReplyEmailResolver`
   but stateless (no Durable Object storage). `encode(payload:, domain:, secret:)`
