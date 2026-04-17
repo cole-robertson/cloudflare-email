@@ -421,30 +421,20 @@ size-unconstrained, and matches email threading natively.
 
 ---
 
-# Rake tasks
+# Rake tasks + token scopes
 
-| Task | What it does |
-|---|---|
-| `cloudflare:email:doctor` | Checks credentials, API token validity, ingress secret strength, token split, `ActionMailbox.ingress = :cloudflare`, delivery method registration. Exit code 1 on failure. |
-| `cloudflare:email:send_test` | One-shot test send. `TO=addr` required; `FROM=addr` auto-detected from verified sending domains. |
-| `cloudflare:email:deploy_worker` | Deploys the Worker + sets both secrets via the Cloudflare API (pure Ruby). `URL=https://...` sets `RAILS_INGRESS_URL`. Targets `cloudflare-email-ingress-#{Rails.env}`. |
-| `cloudflare:email:provision_route` | `ADDRESS=cole@domain.com`: creates (or updates) a Cloudflare Email Routing rule binding that address to the env-scoped Worker. Idempotent. |
-| `cloudflare:email:provision_catchall` | `DOMAIN=in.example.com`: points the zone's catch-all rule at the env-scoped Worker. Useful for bounce handling and dev subdomains. |
-| `cloudflare:email:dev` | `cloudflared` tunnel + auto-update of the `-development` Worker's `RAILS_INGRESS_URL`. Inbound dev loop. |
+| Task | What it does | Token scopes |
+|---|---|---|
+| `doctor` | Verifies credentials, API token validity, ingress secret, `ActionMailbox.ingress`, delivery method. Exit 1 on failure. | `Email Sending: Send` |
+| `send_test TO=addr [FROM=addr]` | One-shot test send. FROM auto-detected from verified sending domains. | `Email Sending: Send` |
+| `deploy_worker URL=https://...` | Uploads the Worker + sets `INGRESS_SECRET` + `RAILS_INGRESS_URL`. Pure Ruby, no wrangler. Targets `cloudflare-email-ingress-#{Rails.env}`. | `Workers Scripts: Edit` |
+| `provision_route ADDRESS=addr@domain` | Creates/updates an Email Routing rule binding the address to the env-scoped Worker. Idempotent. | `Zone: Read`, `Email Routing: Edit` |
+| `provision_catchall DOMAIN=sub.domain` | Points the zone's catch-all rule at the env-scoped Worker. | `Zone: Read`, `Email Routing: Edit` |
+| `dev` | Starts a `cloudflared` tunnel, auto-updates the `-development` Worker's `RAILS_INGRESS_URL` to point at it. | `Workers Scripts: Edit` |
 
-## API token scopes
-
-Create at `dash.cloudflare.com/profile/api-tokens` → **Custom Token**:
-
-| Scope | Used by |
-|---|---|
-| Account → Email Sending → Send | Outbound (runtime token) |
-| Account → Workers Scripts → Edit | `deploy_worker`, `dev` |
-| Zone → Zone → Read | `provision_route`, `provision_catchall` |
-| Zone → Email Routing → Edit | `provision_route`, `provision_catchall` |
-
-**Scope to a single account** (not "All accounts"). Zone Resources should
-cover the domains you'll route to.
+Create tokens at `dash.cloudflare.com/profile/api-tokens` → **Custom Token**.
+Scope to a single account. For production, use two tokens: a runtime
+(`Email Sending: Send` only) and a management (everything else).
 
 ---
 
@@ -509,39 +499,22 @@ end
 | `cloudflare_email.send_raw` | `:account_id`, `:path`, `:status`, `:message_id` (nil) |
 | `cloudflare_email.ingress` | `:bytes`, `:result` (`:ok` / `:bad_signature` / `:stale`), `:message_id` when `:ok` |
 
-## Compatibility
-
-- **Ruby**: 3.1+
-- **Rails**: 7.1, 7.2, 8.0, 8.1
-- **Cloudflare Email Service**: public beta (April 2026)
-
 ## Testing the gem itself
 
 ```sh
-# Gem unit tests
 bundle exec rake test
-
-# Under each supported Rails
+# Against a specific Rails:
 BUNDLE_GEMFILE=gemfiles/rails_7_1.gemfile bundle exec rake test
-BUNDLE_GEMFILE=gemfiles/rails_8_1.gemfile bundle exec rake test
-
-# Worker JavaScript tests
+# Worker tests:
 cd templates/worker && npm install --legacy-peer-deps && npm test
 ```
 
-A full end-to-end trial Rails app lives under `trial/` (not shipped in the gem).
-
----
-
 ## Status
 
-**v0.1**. Cloudflare Email Service is itself in public beta. The gem is
-verified end-to-end against live Cloudflare for outbound, inbound (HMAC
-Worker pipe), Worker deploy (pure-Ruby API), Email Routing provisioning,
-catch-all routing, and SecureMessageId signing/verification. 130+ gem unit tests,
-20 trial integration tests, 6 Worker vitest tests — all green.
-
-Issues and PRs welcome.
+**v0.1**. Ruby 3.1+, Rails 7.1 / 7.2 / 8.0 / 8.1. Cloudflare Email Service
+is itself in public beta. Verified against live Cloudflare end-to-end for
+outbound, inbound, Worker deploy, route provisioning, and signed-Message-ID
+reply auth. Issues and PRs welcome.
 
 ## License
 
