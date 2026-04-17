@@ -97,15 +97,24 @@ module Cloudflare
 
         def maybe_deploy_worker
           return unless options[:inbound]
-          return unless wrangler_installed?
 
           should_deploy = options[:deploy_worker]
           if should_deploy.nil?
             say ""
-            should_deploy = yes?("Deploy the Worker now via wrangler? (requires wrangler login or CLOUDFLARE_API_TOKEN) [y/N]", :green)
+            say "  The Worker can be deployed via the Cloudflare API (pure Ruby, no wrangler/Node)"
+            say "  once you've set cloudflare.account_id and cloudflare.api_token in Rails credentials."
+            say "  Run `bin/rails cloudflare:email:deploy_worker URL=https://yourapp.com#{ingress_path}`"
+            say "  after `bin/rails credentials:edit`."
+            say ""
+            say "  Alternatively, deploy now via wrangler if it's installed locally." if wrangler_installed?
           end
-          return unless should_deploy
 
+          if should_deploy && wrangler_installed?
+            wrangler_deploy
+          end
+        end
+
+        def wrangler_deploy
           @ingress_secret = SecureRandom.hex(32)
 
           inside options[:worker_dir] do
@@ -150,7 +159,11 @@ module Cloudflare
           say ""
 
           if options[:inbound] && !@worker_deployed
-            say "  4. Deploy the Worker:"
+            say "  4. Deploy the Worker (pick one):"
+            say "       # Pure Ruby (recommended — no wrangler/Node required):"
+            say "       bin/rails cloudflare:email:deploy_worker URL=https://yourapp.com#{ingress_path}"
+            say ""
+            say "       # Or via wrangler if you have it installed:"
             say "       cd #{options[:worker_dir]}"
             say "       npm install --legacy-peer-deps"
             say "       wrangler secret put INGRESS_SECRET     # paste #{@ingress_secret[0, 8]}..."

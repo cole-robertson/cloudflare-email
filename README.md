@@ -127,6 +127,11 @@ delivers mail to an **Email Worker**, not an HTTPS webhook. This gem ships a
 Worker that signs each message with HMAC-SHA256 and POSTs it to a Rails
 `ActionMailbox` ingress it also sets up for you.
 
+The Worker is plain JavaScript, and the gem ships a pure-Ruby deployer that
+talks to Cloudflare's Workers API directly — **you don't need Node, npm, or
+wrangler** to set this up. `wrangler` is supported as an alternative if you
+prefer the Cloudflare-native tooling.
+
 ## Setup
 
 Same install command, keep the default `--inbound`:
@@ -138,15 +143,41 @@ bin/rails credentials:edit
 bin/rails cloudflare:email:doctor
 ```
 
-The interactive installer asks three questions:
+The interactive installer:
 
-1. **Deploy the Worker now via wrangler?** — runs `npm install`, sets both
-   Worker secrets, and `wrangler deploy`s in one pass.
-2. **Scaffold a default MainMailbox + catch-all route?** — creates
-   `app/mailboxes/main_mailbox.rb` with a stub `#process` so inbound mail has
-   somewhere to land on day one (no `RoutingError` on your first test).
-3. **Install ActionMailbox if missing?** — runs
-   `bin/rails action_mailbox:install` and migrates the DB for you.
+1. Copies the Worker template into `cloudflare-worker/` and writes the
+   `config/initializers/cloudflare_email.rb` initializer.
+2. **Scaffolds a default `MainMailbox` + catch-all route** (prompt) so inbound
+   mail has somewhere to land on day one (no `RoutingError` on your first
+   test).
+3. **Runs `bin/rails action_mailbox:install`** (prompt) if ActionMailbox is
+   missing in the app.
+
+After the installer and `credentials:edit`, **deploy the Worker**:
+
+```sh
+bin/rails cloudflare:email:deploy_worker URL=https://yourapp.com/rails/action_mailbox/cloudflare/inbound_emails
+```
+
+That's a pure-Ruby call to the Cloudflare API — no Node / npm / wrangler. It:
+
+- Uploads `cloudflare-worker/src/index.js` as a module Worker named
+  `cloudflare-email-ingress`
+- Sets the Worker's `INGRESS_SECRET` from your Rails credentials
+- Sets the Worker's `RAILS_INGRESS_URL` to the value you passed
+
+**API token scope needed**: add `Account → Workers Scripts → Edit` to the
+token (in addition to the `Email Sending → Send` scope used for outbound).
+
+If you prefer wrangler:
+
+```sh
+cd cloudflare-worker
+npm install --legacy-peer-deps
+wrangler secret put INGRESS_SECRET        # paste the value from credentials
+wrangler secret put RAILS_INGRESS_URL     # https://yourapp.com/rails/action_mailbox/cloudflare/inbound_emails
+wrangler deploy
+```
 
 Credentials:
 
@@ -300,15 +331,17 @@ Applies to both sending and receiving.
 |---|---|
 | `cloudflare:email:doctor` | Checks credentials, API token validity, ingress secret strength, `ActionMailbox.ingress = :cloudflare`, delivery method registration. Exit code 1 on failure. |
 | `cloudflare:email:send_test` | One-shot test send. `TO=addr` required; `FROM=addr` auto-detected from verified sending domains if omitted. |
-| `cloudflare:email:dev` | `cloudflared` tunnel + Worker `RAILS_INGRESS_URL` update + Worker log tail. Inbound dev. |
+| `cloudflare:email:deploy_worker` | Deploys the Worker + sets both secrets via the Cloudflare API (pure Ruby, no wrangler/Node). `URL=https://...` sets `RAILS_INGRESS_URL`. |
+| `cloudflare:email:dev` | `cloudflared` tunnel + Worker `RAILS_INGRESS_URL` update via Cloudflare API. Inbound dev loop. |
 
 ## API token scopes
 
 Create at `dash.cloudflare.com/profile/api-tokens` as a **Custom Token**:
 
-- **Account → Email Sending → Send** (required)
-- **Account → Workers Scripts → Edit** (only if you want the installer or
-  `cloudflare:email:dev` to manage the Worker for you)
+- **Account → Email Sending → Send** (required for outbound)
+- **Account → Workers Scripts → Edit** (required to use
+  `cloudflare:email:deploy_worker` or `cloudflare:email:dev` — i.e. to
+  manage the Worker from Rails instead of the dashboard or wrangler)
 
 Account Resources: scope to a single account.
 

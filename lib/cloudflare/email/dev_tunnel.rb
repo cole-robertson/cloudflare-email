@@ -1,33 +1,38 @@
-require "open3"
+require "cloudflare/email/worker_deployer"
 
 module Cloudflare
   module Email
-    # `bin/rails cloudflare:email:dev` — spins up a cloudflared tunnel, updates
-    # the deployed Worker's RAILS_INGRESS_URL secret, and tails Worker logs.
-    # Keeps running until Ctrl-C.
+    # `bin/rails cloudflare:email:dev` — spins up a cloudflared tunnel and
+    # updates the deployed Worker's RAILS_INGRESS_URL secret so inbound mail
+    # can flow through to this local Rails server. No wrangler required.
     class DevTunnel
       INGRESS_PATH = "/rails/action_mailbox/cloudflare/inbound_emails".freeze
-      WORKER_NAME  = "cloudflare-email-ingress".freeze
 
       def self.call(port: 3000, io: $stdout)
         new(port: port, io: io).call
       end
 
       def initialize(port:, io: $stdout)
-        @port = port
-        @io   = io
+        @port       = port
+        @io         = io
         @tunnel_pid = nil
       end
 
       def call
         check_prerequisites
+
+        deployer = Cloudflare::Email::WorkerDeployer.new(
+          account_id: credential(:account_id),
+          api_token:  credential(:api_token),
+        )
+
         start_tunnel
         tunnel_url = wait_for_tunnel_url
         @io.puts "  Tunnel:  #{tunnel_url}"
 
         ingress_url = "#{tunnel_url}#{INGRESS_PATH}"
-        update_worker_secret(ingress_url)
-        @io.puts "  Worker RAILS_INGRESS_URL updated → #{ingress_url}"
+        deployer.put_secret("RAILS_INGRESS_URL", ingress_url)
+        @io.puts "  Worker '#{deployer.script_name}' RAILS_INGRESS_URL updated → #{ingress_url}"
         @io.puts ""
         @io.puts "  Send mail to your routed address; it'll land in this Rails app."
         @io.puts "  Ctrl-C to stop."
@@ -36,8 +41,8 @@ module Cloudflare
         trap("INT")  { cleanup; exit 0 }
         trap("TERM") { cleanup; exit 0 }
 
-        # Tail Worker logs inline.
-        system("wrangler", "tail", WORKER_NAME)
+        # Stay alive so the tunnel keeps running. The user stops us with Ctrl-C.
+        sleep
       ensure
         cleanup
       end
@@ -45,10 +50,13 @@ module Cloudflare
       private
 
       def check_prerequisites
-        raise "cloudflared not found in PATH — install from https://developers.cloudflare.com/cloudflared/" \
-          unless system("command -v cloudflared >/dev/null 2>&1")
-        raise "wrangler not found in PATH — run `npm i -g wrangler`" \
-          unless system("command -v wrangler >/dev/null 2>&1")
+        unless system("command -v cloudflared >/dev/null 2>&1")
+          raise "cloudflared not found in PATH — install from https://developers.cloudflare.com/cloudflared/"
+        end
+        if credential(:account_id).empty? || credential(:api_token).empty?
+          raise "Missing cloudflare.account_id or cloudflare.api_token in credentials " \
+                "(or CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_API_TOKEN env vars)"
+        end
       end
 
       def start_tunnel
@@ -72,16 +80,6 @@ module Cloudflare
         raise "Timed out waiting for cloudflared to return a tunnel URL"
       end
 
-      def update_worker_secret(url)
-        out, err, status = Open3.capture3(
-          "wrangler", "secret", "put", "RAILS_INGRESS_URL", "--name", WORKER_NAME,
-          stdin_data: url,
-        )
-        unless status.success?
-          raise "wrangler secret put failed: #{err.empty? ? out : err}"
-        end
-      end
-
       def cleanup
         if @tunnel_pid
           Process.kill("TERM", @tunnel_pid) rescue nil
@@ -89,6 +87,12 @@ module Cloudflare
           @tunnel_pid = nil
         end
         @tunnel_log&.close
+      end
+
+      def credential(key)
+        from_credentials = Rails.application.credentials.dig(:cloudflare, key).to_s
+        return from_credentials unless from_credentials.empty?
+        ENV["CLOUDFLARE_#{key.to_s.upcase}"].to_s
       end
     end
   end

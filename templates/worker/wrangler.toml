@@ -1,5 +1,5 @@
 name = "cloudflare-email-ingress"
-main = "src/index.ts"
+main = "src/index.js"
 compatibility_date = "2026-04-01"
 
 # Required secrets (set via `wrangler secret put`):

@@ -5,25 +5,14 @@
  * HMAC-SHA256 over "{timestamp}.{raw_body}", and POSTs it to the Rails
  * ingress controller shipped with the cloudflare-email gem.
  *
- * Configure via `wrangler secret put`:
+ * Required environment variables (set via `wrangler secret put` OR the
+ * `cloudflare:email:deploy_worker` rake task shipped with this gem):
+ *
  *   RAILS_INGRESS_URL   e.g. https://your-app.example.com/rails/action_mailbox/cloudflare/inbound_emails
  *   INGRESS_SECRET      shared secret (same as cloudflare.ingress_secret in Rails credentials)
  */
 
-export interface Env {
-  RAILS_INGRESS_URL: string;
-  INGRESS_SECRET: string;
-}
-
-interface ForwardableEmailMessage {
-  readonly from: string;
-  readonly to: string;
-  readonly raw: ReadableStream<Uint8Array>;
-  readonly rawSize: number;
-  setReject(reason: string): void;
-}
-
-function toHex(buf: ArrayBuffer): string {
+function toHex(buf) {
   const bytes = new Uint8Array(buf);
   let out = "";
   for (let i = 0; i < bytes.length; i++) {
@@ -32,7 +21,7 @@ function toHex(buf: ArrayBuffer): string {
   return out;
 }
 
-async function sign(secret: string, data: Uint8Array): Promise<string> {
+async function sign(secret, data) {
   const key = await crypto.subtle.importKey(
     "raw",
     new TextEncoder().encode(secret),
@@ -45,7 +34,7 @@ async function sign(secret: string, data: Uint8Array): Promise<string> {
 }
 
 export default {
-  async email(message: ForwardableEmailMessage, env: Env): Promise<void> {
+  async email(message, env) {
     if (!env.RAILS_INGRESS_URL || !env.INGRESS_SECRET) {
       message.setReject("worker missing RAILS_INGRESS_URL or INGRESS_SECRET");
       return;
@@ -61,7 +50,7 @@ export default {
 
     const signature = await sign(env.INGRESS_SECRET, signedPayload);
 
-    let res: Response;
+    let res;
     try {
       res = await fetch(env.RAILS_INGRESS_URL, {
         method: "POST",
@@ -73,7 +62,7 @@ export default {
         body: raw,
       });
     } catch (err) {
-      message.setReject(`upstream fetch failed: ${(err as Error).message}`);
+      message.setReject(`upstream fetch failed: ${err.message}`);
       return;
     }
 

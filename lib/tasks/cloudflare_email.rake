@@ -12,6 +12,12 @@ namespace :cloudflare do
       exit Cloudflare::Email::SendTest.call(to: ENV["TO"], from: ENV["FROM"])
     end
 
+    desc "Deploy the Worker via Cloudflare API (no wrangler/Node required). URL=https://... sets RAILS_INGRESS_URL"
+    task deploy_worker: :environment do
+      require "cloudflare/email/deploy_worker_task"
+      exit Cloudflare::Email::DeployWorkerTask.call(ingress_url: ENV["URL"])
+    end
+
     desc "Run a cloudflared tunnel pointed at this Rails app, update the Worker's RAILS_INGRESS_URL, and tail logs"
     task dev: :environment do
       require "cloudflare/email/dev_tunnel"

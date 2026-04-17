@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **`bin/rails cloudflare:email:deploy_worker`** — pure-Ruby Worker deployer
+  that talks to the Cloudflare Workers API directly. No wrangler, Node, or
+  npm required. Uploads the Worker script and sets both secrets
+  (`INGRESS_SECRET` from Rails credentials, `RAILS_INGRESS_URL` from the
+  `URL=` env var) in one shot.
+- **Worker template rewritten in plain JavaScript** (dropped TypeScript from
+  the deploy path). Same logic, deployable as an ES module without a build
+  step. The `vitest` test suite still covers it.
+- **`cloudflare:email:dev` no longer needs wrangler** — uses the same Ruby
+  Worker deployer to update the tunnel URL on the deployed Worker.
 - **Install generator scaffolds a `MainMailbox`** (interactive prompt) with a
   `routing :all => :main` catch-all so inbound emails have somewhere to land
   on a fresh Rails app — avoids `ActionMailbox::Router::RoutingError` on the

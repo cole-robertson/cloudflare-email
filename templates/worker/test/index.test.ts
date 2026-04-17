@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import worker from "../src/index";
+import worker from "../src/index.js";
 
 // Minimal fake EmailMessage implementing the surface the Worker uses.
 function makeMessage(raw: string) {
