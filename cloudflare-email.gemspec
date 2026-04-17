@@ -9,7 +9,7 @@ Gem::Specification.new do |spec|
   spec.description = "A Ruby client and Rails integration for Cloudflare's Email Service. " \
                      "Send mail via an ActionMailer delivery method, receive mail via an " \
                      "ActionMailbox ingress backed by a shipped Cloudflare Email Worker template."
-  spec.homepage    = "https://github.com/cole/cloudflare-email"
+  spec.homepage    = "https://github.com/cole-robertson/cloudflare-email"
   spec.license     = "MIT"
 
   spec.required_ruby_version = ">= 3.1"
