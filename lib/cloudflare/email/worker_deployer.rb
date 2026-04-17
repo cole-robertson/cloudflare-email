@@ -18,16 +18,30 @@ module Cloudflare
     #   deployer.put_secret("INGRESS_SECRET", "...")
     #   deployer.put_secret("RAILS_INGRESS_URL", "https://...")
     class WorkerDeployer
-      DEFAULT_SCRIPT_NAME        = "cloudflare-email-ingress".freeze
+      SCRIPT_NAME_PREFIX         = "cloudflare-email-ingress".freeze
       DEFAULT_COMPATIBILITY_DATE = "2026-04-01".freeze
       API_BASE                   = "https://api.cloudflare.com/client/v4".freeze
 
       attr_reader :script_name
 
+      # Default Worker name includes the current Rails environment so a dev
+      # tunnel never stomps on the production Worker's RAILS_INGRESS_URL.
+      # Override via `script_name:` for tests or explicit control.
+      def self.default_script_name
+        env = defined?(Rails) && Rails.respond_to?(:env) ? Rails.env.to_s : ENV["RAILS_ENV"].to_s
+        default_script_name_with_env(env)
+      end
+
+      def self.default_script_name_with_env(env)
+        env = "production" if env.to_s.empty?
+        "#{SCRIPT_NAME_PREFIX}-#{env}"
+      end
+
       def initialize(account_id:, api_token:,
-                     script_name: DEFAULT_SCRIPT_NAME,
+                     script_name: nil,
                      compatibility_date: DEFAULT_COMPATIBILITY_DATE,
                      api_base: API_BASE)
+        script_name ||= self.class.default_script_name
         raise ArgumentError, "account_id is required" if account_id.to_s.empty?
         raise ArgumentError, "api_token is required"  if api_token.to_s.empty?
 

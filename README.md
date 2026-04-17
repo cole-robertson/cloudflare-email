@@ -191,14 +191,27 @@ cloudflare:
 The `ingress_secret` is the HMAC shared secret between the Worker and Rails.
 Keep it long (≥32 chars, generated for you).
 
-## Dashboard setup — Email Routing
+## Provision the Email Routing rule
 
-`dash.cloudflare.com` → your zone → **Email** → **Email Routing**:
+Once the Worker is deployed, bind your address to it. One command does it:
 
-1. **Enable Email Routing** on a subdomain (e.g. `in.yourdomain.com`) —
-   Cloudflare will add MX records pointing at `route{1,2,3}.mx.cloudflare.net`.
-2. **Routes** → Add a route for the address you want (e.g. `cole@in.yourdomain.com`)
-   → Action: **Send to a Worker** → select `cloudflare-email-ingress`.
+```sh
+ADDRESS=cole@in.yourdomain.com bin/rails cloudflare:email:provision_route
+```
+
+This looks up the Cloudflare zone that owns the domain, enables Email
+Routing on it if needed, and creates (or updates) a rule sending mail for
+that address to the env-scoped Worker (`cloudflare-email-ingress-#{Rails.env}`).
+Idempotent — running it twice is safe.
+
+**API token scope needed** for this task: add `Zone → Zone → Read` and
+`Zone → Email Routing → Edit` to your token (in addition to `Email Sending:
+Send` and `Workers Scripts: Edit`).
+
+If you'd rather click through the dashboard: `dash.cloudflare.com` → your
+zone → **Email** → **Email Routing** → **Routes** → add a route:
+`cole@in.yourdomain.com` → **Send to a Worker** → select
+`cloudflare-email-ingress-production` (or whichever env).
 
 ### ⚠️ Apex vs subdomain
 
@@ -331,8 +344,9 @@ Applies to both sending and receiving.
 |---|---|
 | `cloudflare:email:doctor` | Checks credentials, API token validity, ingress secret strength, `ActionMailbox.ingress = :cloudflare`, delivery method registration. Exit code 1 on failure. |
 | `cloudflare:email:send_test` | One-shot test send. `TO=addr` required; `FROM=addr` auto-detected from verified sending domains if omitted. |
-| `cloudflare:email:deploy_worker` | Deploys the Worker + sets both secrets via the Cloudflare API (pure Ruby, no wrangler/Node). `URL=https://...` sets `RAILS_INGRESS_URL`. |
-| `cloudflare:email:dev` | `cloudflared` tunnel + Worker `RAILS_INGRESS_URL` update via Cloudflare API. Inbound dev loop. |
+| `cloudflare:email:deploy_worker` | Deploys the Worker + sets both secrets via the Cloudflare API (pure Ruby, no wrangler/Node). `URL=https://...` sets `RAILS_INGRESS_URL`. Targets the Worker named `cloudflare-email-ingress-#{Rails.env}`. |
+| `cloudflare:email:provision_route` | `ADDRESS=cole@domain.com`: creates (or updates) a Cloudflare Email Routing rule binding that address to the env-scoped Worker. Looks up the zone automatically. Idempotent. |
+| `cloudflare:email:dev` | `cloudflared` tunnel + Worker `RAILS_INGRESS_URL` update via Cloudflare API. Only touches the `-development` Worker. Inbound dev loop. |
 
 ## API token scopes
 
@@ -342,6 +356,10 @@ Create at `dash.cloudflare.com/profile/api-tokens` as a **Custom Token**:
 - **Account → Workers Scripts → Edit** (required to use
   `cloudflare:email:deploy_worker` or `cloudflare:email:dev` — i.e. to
   manage the Worker from Rails instead of the dashboard or wrangler)
+- **Zone → Zone → Read** (required for `cloudflare:email:provision_route` —
+  looks up the zone that owns your domain)
+- **Zone → Email Routing → Edit** (required for `cloudflare:email:provision_route` —
+  enables Email Routing and creates rules)
 
 Account Resources: scope to a single account.
 

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- **Per-environment Worker naming**: the default Worker is now
+  `cloudflare-email-ingress-#{Rails.env}` instead of a single shared
+  `cloudflare-email-ingress`. Critical fix — `cloudflare:email:dev` can no
+  longer clobber the production Worker's `RAILS_INGRESS_URL`. Prod and
+  dev/staging deploy as separate scripts with separate secrets.
+- **`bin/rails cloudflare:email:provision_route ADDRESS=addr@domain.com`** —
+  one-command Email Routing setup via Cloudflare API. Looks up the zone
+  owning the domain, enables Email Routing if needed, creates or updates a
+  rule binding that address to the env-scoped Worker. Idempotent.
 - **`bin/rails cloudflare:email:deploy_worker`** — pure-Ruby Worker deployer
   that talks to the Cloudflare Workers API directly. No wrangler, Node, or
   npm required. Uploads the Worker script and sets both secrets

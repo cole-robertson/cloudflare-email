@@ -18,6 +18,15 @@ namespace :cloudflare do
       exit Cloudflare::Email::DeployWorkerTask.call(ingress_url: ENV["URL"])
     end
 
+    desc "Create Cloudflare Email Routing rule: ADDRESS=addr@domain → env-scoped Worker (WORKER=name to override)"
+    task provision_route: :environment do
+      require "cloudflare/email/provision_route_task"
+      exit Cloudflare::Email::ProvisionRouteTask.call(
+        address:     ENV["ADDRESS"],
+        worker_name: ENV["WORKER"],
+      )
+    end
+
     desc "Run a cloudflared tunnel pointed at this Rails app, update the Worker's RAILS_INGRESS_URL, and tail logs"
     task dev: :environment do
       require "cloudflare/email/dev_tunnel"

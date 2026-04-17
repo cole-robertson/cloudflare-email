@@ -5,12 +5,19 @@ require "tempfile"
 class WorkerDeployerTest < Minitest::Test
   ACCOUNT = "acct-test".freeze
   TOKEN   = "cf-token".freeze
-  SCRIPT  = "cloudflare-email-ingress".freeze
+  SCRIPT  = "cloudflare-email-ingress-test".freeze  # matches what Rails.env returns in tests
 
   def make_deployer(**overrides)
     Cloudflare::Email::WorkerDeployer.new(
-      account_id: ACCOUNT, api_token: TOKEN, **overrides,
+      account_id: ACCOUNT, api_token: TOKEN,
+      script_name: overrides.delete(:script_name) || SCRIPT,
+      **overrides,
     )
+  end
+
+  def test_default_script_name_uses_rails_env
+    assert_equal "cloudflare-email-ingress-production",
+                 Cloudflare::Email::WorkerDeployer.default_script_name_with_env("production")
   end
 
   def script_url
