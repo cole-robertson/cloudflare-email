@@ -14,14 +14,22 @@ Gem::Specification.new do |spec|
 
   spec.required_ruby_version = ">= 3.1"
 
-  spec.metadata["homepage_uri"]    = spec.homepage
   spec.metadata["source_code_uri"] = spec.homepage
   spec.metadata["changelog_uri"]   = "#{spec.homepage}/blob/main/CHANGELOG.md"
+  spec.metadata["bug_tracker_uri"] = "#{spec.homepage}/issues"
 
+  # Explicitly enumerate the files to ship so generated artifacts like
+  # node_modules/ or .wrangler/ can never accidentally leak into the gem.
   spec.files = Dir[
     "lib/**/*.rb",
+    "lib/**/*.rake",
     "app/**/*.rb",
-    "templates/**/*",
+    "templates/worker/README.md",
+    "templates/worker/package.json",
+    "templates/worker/wrangler.toml",
+    "templates/worker/vitest.config.ts",
+    "templates/worker/src/*.js",
+    "templates/worker/test/*.test.ts",
     "README.md",
     "CHANGELOG.md",
     "LICENSE.txt",
