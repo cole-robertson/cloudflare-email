@@ -144,9 +144,17 @@ describe("cloudflare-email Worker", () => {
     vi.useFakeTimers();
     await worker.email(makeMessage(RAW).message as any, { RAILS_INGRESS_URL: URL_, INGRESS_SECRET: SECRET });
     const options = fetchSpy.mock.calls[0][1];
-    expect(options.redirect).toBe("error");
+    expect(options.redirect).toBe("manual");
     await vi.advanceTimersByTimeAsync(15_000);
     expect(options.signal.aborted).toBe(false);
+  });
+
+  it("rejects an ingress redirect response", async () => {
+    fetchSpy.mockResolvedValueOnce(new Response(null, { status: 302, headers: { Location: "https://other.test" } }));
+    const { message, rejects } = makeMessage(RAW);
+    await worker.email(message as any, { RAILS_INGRESS_URL: URL_, INGRESS_SECRET: SECRET });
+    expect(rejects).toEqual(["upstream returned 302"]);
+    expect(fetchSpy).toHaveBeenCalledOnce();
   });
 
   it("signature covers tampered bodies differently", async () => {

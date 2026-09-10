@@ -2,6 +2,10 @@
 
 ## 0.2.0 — Unreleased
 
+- Verify actual local workerd-to-Rails delivery in CI. This exposed and fixed an
+  unsupported fetch redirect mode; use `manual` and reject the 3xx response.
+  Add reusable package/fresh-install/task verification and a dated evidence report.
+
 - Add outbound delivery events through Cloudflare Queues HTTP pull, typed event
   data, account/domain checks, per-message acknowledgement after handler success,
   and a Rails `consume_events` task. Applications provide durable idempotency.

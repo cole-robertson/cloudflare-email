@@ -3,11 +3,14 @@ require "tmpdir"
 require "fileutils"
 require "minitest/autorun"
 require "minitest/mock"
+require "webmock/minitest"
+WebMock.disable_net_connect!(allow_localhost: true)
 require "rails"
 require "action_controller/railtie"
 require "action_mailer/railtie"
 
-INBOUND = ARGV.delete("inbound")
+FRESH_INBOUND = ARGV.delete("fresh_inbound")
+INBOUND = ARGV.delete("inbound") || FRESH_INBOUND
 ARGV.delete("send_only")
 if INBOUND
   require "active_record/railtie"
@@ -25,11 +28,22 @@ require "rack/test"
 APP_ROOT = Dir.mktmpdir("cloudflare-email-rails")
 Minitest.after_run { FileUtils.remove_entry(APP_ROOT) }
 ENV["RAILS_ENV"] = "test"
-ENV["DATABASE_URL"] = "sqlite3::memory:"
+ENV["DATABASE_URL"] = FRESH_INBOUND ? "sqlite3:#{APP_ROOT}/test.sqlite3" : "sqlite3::memory:"
 ENV["CLOUDFLARE_ACCOUNT_ID"] = "environment-account"
 ENV["CLOUDFLARE_API_TOKEN"] = "environment-token"
+ENV["CLOUDFLARE_MANAGEMENT_TOKEN"] = "environment-management-token"
 ENV["CLOUDFLARE_INGRESS_SECRET"] = "integration-secret"
 FileUtils.mkdir_p("#{APP_ROOT}/config/initializers")
+FileUtils.mkdir_p("#{APP_ROOT}/app/mailboxes")
+if FRESH_INBOUND
+  FileUtils.mkdir_p("#{APP_ROOT}/config/environments")
+  %w[development production test].each do |environment|
+    File.write("#{APP_ROOT}/config/environments/#{environment}.rb", "Rails.application.configure do\nend\n")
+  end
+  File.write("#{APP_ROOT}/config/application.rb", "# Application already initialized by integration harness\n")
+  File.write("#{APP_ROOT}/config/environment.rb", "# Application already initialized by integration harness\n")
+  File.write("#{APP_ROOT}/Rakefile", "Rails.application.load_tasks\n")
+end
 FileUtils.cp(File.join(GEM_ROOT, "lib/generators/cloudflare/email/templates/initializer.rb"),
              "#{APP_ROOT}/config/initializers/cloudflare_email.rb")
 
@@ -51,7 +65,15 @@ class IntegrationApp < Rails::Application
 end
 IntegrationApp.initialize!
 
-if INBOUND
+if FRESH_INBOUND
+  Dir.chdir(APP_ROOT) do
+    generator = Cloudflare::Email::Generators::InstallGenerator.new([], {
+      inbound: true, deploy_worker: false, scaffold_mailbox: true,
+    }, destination_root: APP_ROOT)
+    generator.define_singleton_method(:yes?) { |*| true }
+    generator.invoke_all
+  end
+elsif INBOUND
   ActiveRecord::Migration.verbose = false
   %w[activestorage actionmailbox].each do |gem_name|
     Dir["#{Gem.loaded_specs.fetch(gem_name).full_gem_path}/db/migrate/*.rb"].each { |file| require file }
@@ -71,6 +93,31 @@ class RailsAppTest < Minitest::Test
     assert_equal :cloudflare, ActionMailer::Base.delivery_method
     assert_equal "environment-account", ActionMailer::Base.cloudflare_settings[:account_id]
     assert_equal "environment-token", ActionMailer::Base.cloudflare_settings[:api_token]
+  end
+
+  def test_public_doctor_reports_success_with_read_only_http_checks
+    require "cloudflare/email/doctor"
+    stub_request(:get, "https://api.cloudflare.com/client/v4/user/tokens/verify")
+      .with(headers: { "Authorization" => "Bearer environment-token" })
+      .to_return(body: JSON.generate("success" => true, "result" => { "status" => "active", "id" => "synthetic-id" }))
+    stub_request(:get, "https://api.cloudflare.com/client/v4/accounts/environment-account")
+      .to_return(body: JSON.generate("success" => true, "result" => { "name" => "Synthetic account" }))
+    output = StringIO.new
+    assert_equal 0, Cloudflare::Email::Doctor.call(io: output)
+    assert_includes output.string, "[skip]"
+    assert_includes output.string, "Sending domains"
+    refute_includes output.string, "environment-token"
+    assert_not_requested :post, %r{api.cloudflare.com}
+  end
+
+  def test_public_doctor_returns_nonzero_for_invalid_token
+    require "cloudflare/email/doctor"
+    stub_request(:get, %r{https://api.cloudflare.com/client/v4/})
+      .to_return(status: 403, body: JSON.generate("success" => false, "errors" => [{ "message" => "Denied" }]))
+    output = StringIO.new
+    assert_equal 1, Cloudflare::Email::Doctor.call(io: output)
+    assert_includes output.string, "failure(s)"
+    assert_not_requested :post, %r{api.cloudflare.com}
   end
 
   def test_dev_tunnel_rejects_test_and_production_before_external_work
@@ -99,6 +146,44 @@ class RailsAppTest < Minitest::Test
   end
 
   if INBOUND
+    def test_dev_tunnel_cleans_up_after_discovery_and_api_failures
+      original_env = Rails.env
+      Rails.env = "development"
+      [:discovery, :api].each do |failure|
+        WebMock.reset!
+        tunnel = Cloudflare::Email::DevTunnel.new(port: 3456, io: StringIO.new)
+        tunnel.define_singleton_method(:system) { |*| true }
+        tunnel.define_singleton_method(:spawn) { |*, **| 12345 }
+        tunnel.define_singleton_method(:wait_for_tunnel_url) do
+          raise "Tunnel discovery timed out" if failure == :discovery
+          "https://synthetic.trycloudflare.com"
+        end
+        endpoint = "https://api.cloudflare.com/client/v4/accounts/environment-account/workers/scripts/cloudflare-email-ingress-development/secrets"
+        if failure == :api
+          stub_request(:put, endpoint).with(headers: { "Authorization" => "Bearer environment-management-token" },
+            body: { name: "RAILS_INGRESS_URL", text: "https://synthetic.trycloudflare.com/rails/action_mailbox/cloudflare/inbound_emails", type: "secret_text" }.to_json)
+            .to_return(status: 403, body: JSON.generate("success" => false, "errors" => [{ "message" => "Denied" }]))
+        end
+        lifecycle = []
+        Process.stub(:kill, ->(signal, pid) { lifecycle << [:kill, signal, pid] }) do
+          Process.stub(:wait, ->(pid) { lifecycle << [:wait, pid] }) do
+            assert_raises(failure == :api ? Cloudflare::Email::Error : RuntimeError) { tunnel.call }
+          end
+        end
+        assert_equal [[:kill, "TERM", 12345], [:wait, 12345]], lifecycle
+        assert_nil tunnel.instance_variable_get(:@tunnel_pid)
+        assert_nil tunnel.instance_variable_get(:@tunnel_log).path
+        if failure == :api
+          assert_requested :put, endpoint, times: 1
+        else
+          assert_not_requested :put, %r{api.cloudflare.com}
+        end
+        assert_not_requested :put, %r{cloudflare-email-ingress-(production|staging)}
+      end
+    ensure
+      Rails.env = original_env
+    end
+
     def signed_post(body, timestamp: Time.now.to_i.to_s, signature: nil)
       signature ||= Cloudflare::Email::Verification.sign(secret: ENV.fetch("CLOUDFLARE_INGRESS_SECRET"), body: body, timestamp: timestamp)
       post "/rails/action_mailbox/cloudflare/inbound_emails", body,
@@ -134,6 +219,22 @@ class RailsAppTest < Minitest::Test
       assert_equal 404, last_response.status
     ensure
       ActionMailbox.ingress = :cloudflare
+    end
+
+    if FRESH_INBOUND
+      def test_fresh_install_migrates_scaffolds_and_processes_mail
+        assert File.exist?("#{APP_ROOT}/app/mailboxes/application_mailbox.rb")
+        assert File.exist?("#{APP_ROOT}/app/mailboxes/main_mailbox.rb")
+        assert_operator Dir["#{APP_ROOT}/db/migrate/*.rb"].size, :>=, 2
+        # Files generated after eager boot need loading in this already-running harness.
+        require "#{APP_ROOT}/app/mailboxes/application_mailbox"
+        require "#{APP_ROOT}/app/mailboxes/main_mailbox"
+        signed_post("From: sender@example.com\r\nTo: test@example.com\r\nMessage-ID: <mailbox-job@example.com>\r\nSubject: Process me\r\n\r\nBody\r\n")
+        assert_equal 200, last_response.status
+        inbound = ActionMailbox::InboundEmail.find_by!(message_id: "mailbox-job@example.com")
+        ActionMailbox::RoutingJob.perform_now(inbound)
+        assert inbound.reload.delivered?
+      end
     end
   else
     def test_send_only_boot_does_not_require_action_mailbox

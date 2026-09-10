@@ -41,7 +41,7 @@ The old README's signed-reply identity and exactly-once claims were too strong. 
 
 ## Verification before publishing/deploying
 
-Local automated coverage includes Rails boot/generators/ingress persistence, duplicate deliveries, mocked sending/routing/event APIs, Worker unit tests, and dry-run Worker builds. The API tests exercise documented contracts; they do not prove a live account is configured.
+Local automated coverage includes fresh Rails installation/migrations/mailbox execution, task orchestration, packaged installation, duplicate deliveries, mocked sending/routing/event APIs, Worker unit tests, dry-run builds, and actual local workerd-to-Rails forwarding. The runtime test caught and fixed unsupported `redirect: "error"`; the Worker now uses `manual` and rejects 3xx responses. The API tests exercise documented contracts; they do not prove a live account is configured. See the [verification report](verification/2026-09-10.md).
 
 In an account and mailboxes you control, verify these before production rollout:
 

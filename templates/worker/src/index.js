@@ -63,7 +63,8 @@ export default {
         },
         body: raw,
         signal: controller.signal,
-        redirect: "error",
+        // Workers supports follow/manual; non-2xx handling below rejects redirects.
+        redirect: "manual",
       });
     } catch (err) {
       message.setReject(controller.signal.aborted ? "upstream fetch timed out" : "upstream fetch failed");

@@ -1,0 +1,4 @@
+# Optional local workerd-to-Rails verification; no runtime dependencies added.
+eval_gemfile File.expand_path("../Gemfile", __dir__)
+gem "rackup", "~> 2.3"
+gem "webrick", "~> 1.9"

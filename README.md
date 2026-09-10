@@ -245,6 +245,7 @@ Cloudflare documents Email Sending Edit permission for SMTP, implicit TLS on por
 ```sh
 bundle install
 bundle exec rake test
+bundle exec ruby script/verify_package.rb
 BUNDLE_GEMFILE=gemfiles/rails_7_2.gemfile bundle install
 BUNDLE_GEMFILE=gemfiles/rails_7_2.gemfile bundle exec rake test
 cd templates/worker
@@ -254,7 +255,16 @@ npm run check
 npm audit
 ```
 
-Tests include actual Rails boot/installation, ActionMailbox persistence and duplicate requests, HTTP-mocked API behavior, and Worker unit tests. Worker dry-run builds validate bundling; unit tests use Node, not the Workers runtime. The development bundle pins JSON below 3 because current tested Rails versions require its positional-options API.
+Tests include actual Rails boot/installation, ActionMailbox persistence and mailbox processing, task orchestration, HTTP-mocked API behavior, and Worker unit tests. CI also builds and installs the packaged gem and runs a real local workerd-to-Rails check. Run the latter with:
+
+```sh
+BUNDLE_GEMFILE=gemfiles/local_ingress.gemfile bundle install
+BUNDLE_GEMFILE=gemfiles/local_ingress.gemfile bundle exec ruby script/verify_local_ingress.rb
+```
+
+Install the Worker tooling first; Node 22+ must be on PATH (or set `NODE_BINARY` to its executable). This uses synthetic mail and temporary loopback services, not a deployed Cloudflare account. The development bundle pins JSON below 3 because current tested Rails versions require its positional-options API.
+
+See the [verification report](docs/verification/2026-09-10.md) for evidence, the historical dogfood inventory, Rebulk integration findings, and remaining live-provider checks.
 
 No live mail was sent, queues consumed, DNS modified, Workers deployed, or RubyGems release published while preparing this update. See [upgrade notes](docs/upgrading-0.2.md) for compatibility changes and the remaining live checks.
 
