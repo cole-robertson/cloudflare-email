@@ -23,8 +23,10 @@
 - Require FROM for test sends; remove undocumented sending-domain discovery and
   misleading diagnostic claims. Update DNS, SMTP, retry, and signed-ID guidance.
 - Bound legacy signed Message-ID output to 900 bytes; reject empty decode secrets.
-  Its current Cloudflare header preservation is unverified, and it is correlation,
-  not sender authentication. See docs/upgrading-0.2.md for migration details.
+  Live Cloudflare testing confirmed custom IDs are replaced; use provider IDs
+  for correlation, not sender authentication. See docs/upgrading-0.2.md.
+- Accept plain JSON queue bodies returned by live Email Sending subscriptions,
+  retaining Base64 compatibility. Verify real delivery-event redelivery and ack.
 
 ## 0.1.0 — 2026-04-18
 

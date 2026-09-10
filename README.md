@@ -183,7 +183,7 @@ Prefer storing the provider's returned `message_id` with your conversation and c
 
 `SecureMessageId` remains available for transports that preserve custom Message-IDs. It signs a compact JSON payload with HMAC-SHA256 and enforces a default 30-day age limit. It proves payload integrity, not the identity of the person replying. Payloads are encoded, not encrypted, and anyone who sees a token can reuse it until it expires.
 
-Cloudflare's current [header documentation](https://developers.cloudflare.com/email-service/reference/headers/) describes Message-ID as platform-controlled. The raw API's documentation does not settle preservation of custom IDs. **Custom signed-Message-ID round trips were not reverified for this release.** Do not depend on this feature until you test it with your deployed transport and mail clients. See [thread correlation](docs/thread-correlation.md).
+Cloudflare's current [header documentation](https://developers.cloudflare.com/email-service/reference/headers/) describes Message-ID as platform-controlled. **The September 10 live test confirmed that Cloudflare replaced custom signed IDs**, including raw-MIME and ActionMailer sends. Store the provider ID for Cloudflare reply correlation. See [thread correlation](docs/thread-correlation.md) and the [live evidence](docs/verification/2026-09-10-live.md).
 
 ## Retry and configuration
 
@@ -266,6 +266,6 @@ Install the Worker tooling first; Node 22+ must be on PATH (or set `NODE_BINARY`
 
 See the [verification report](docs/verification/2026-09-10.md) for evidence, the historical dogfood inventory, Rebulk integration findings, and remaining live-provider checks.
 
-No live mail was sent, queues consumed, DNS modified, Workers deployed, or RubyGems release published while preparing this update. See [upgrade notes](docs/upgrading-0.2.md) for compatibility changes and the remaining live checks.
+A subsequent [live verification pass](docs/verification/2026-09-10-live.md) exercised isolated sending, deployed ingress, binary attachments, reply threading, real LLM processing, and delivery-event redelivery/acknowledgement under `test.rebulk.com`. All temporary cloud resources were removed afterward. No DNS changes or RubyGems publication occurred. The report records remaining limits, including inbound envelope-aware mailbox selection and LLM draft quality.
 
 MIT license.

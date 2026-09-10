@@ -37,7 +37,7 @@ Responses and notifications expose `message_id` when present and `suppressed_rec
 
 Add a dedicated Queue, Email Sending event subscription, and HTTP pull consumer to use [delivery events](delivery-events.md). Existing applications are not subscribed or polled automatically. Provide an idempotent handler and configure retries/dead-letter handling.
 
-The old README's signed-reply identity and exactly-once claims were too strong. Signed Message-IDs prove payload integrity, not sender identity, and a repeated Message-ID is not a send idempotency key. Review [thread correlation](thread-correlation.md) before retaining that feature. Custom Message-ID preservation remains unverified with today's Cloudflare transport.
+The old README's signed-reply identity and exactly-once claims were too strong. Signed Message-IDs prove payload integrity, not sender identity, and a repeated Message-ID is not a send idempotency key. Review [thread correlation](thread-correlation.md) before retaining that feature. Live testing confirmed Cloudflare replaces custom IDs: store provider IDs and include parent IDs in outgoing reply headers.
 
 ## Verification before publishing/deploying
 

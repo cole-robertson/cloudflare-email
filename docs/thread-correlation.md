@@ -14,7 +14,7 @@ Perform application authorization independently. The email's From header alone i
 
 ## Legacy SecureMessageId helper
 
-This helper is retained for compatible transports; it is not the recommended default for Cloudflare sends until custom-ID preservation has been verified.
+This helper is retained for compatible transports. The September 10 live Cloudflare test replaced custom signed IDs, so use stored provider IDs for Cloudflare sends.
 
 ```ruby
 secret = Cloudflare::Email::Credentials.fetch(:reply_secret)
@@ -36,6 +36,6 @@ Use a nonempty, strong dedicated secret in `cloudflare.reply_secret` or `CLOUDFL
 
 The signature covers the timestamp and JSON payload. It does not authenticate the email sender, encrypt the payload, make the token single-use, or bind the displayed prefix/domain as an authorization context. Keep payloads small and non-sensitive; encoded IDs over 900 bytes are rejected. Mail clients and providers may impose smaller practical limits.
 
-Current [Cloudflare header documentation](https://developers.cloudflare.com/email-service/reference/headers/) says Message-ID is platform-controlled. The [raw MIME API](https://developers.cloudflare.com/api/resources/email_sending/methods/send_raw/) describes full MIME input without guaranteeing custom-ID preservation. The April 2026 project reported a live round trip; that is historical evidence, not verification of today's behavior.
+Current [Cloudflare header documentation](https://developers.cloudflare.com/email-service/reference/headers/) says Message-ID is platform-controlled. The April 2026 project reported a signed-ID round trip, but the [September live test](verification/2026-09-10-live.md) confirmed replacement for both raw-MIME and ActionMailer sends. Provider IDs matched received headers, and replies correlated successfully through those stored IDs. Outgoing replies must also set `In-Reply-To` and `References` from the parent message.
 
 Before relying on this helper, send to a mailbox you control, inspect the delivered raw Message-ID, reply using your supported clients, and verify the returned IDs. No such live send was performed for 0.2.0. If IDs are rewritten, use stored provider-ID correlation instead.
