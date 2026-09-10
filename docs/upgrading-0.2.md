@@ -24,6 +24,11 @@ returns a string-keyed `from`/`to` hash, or `nil` for legacy requests. Legacy
 signatures remain accepted, but HTTP/MIME envelope headers are never trusted for
 those requests. Route tenant mailboxes using the trusted SMTP recipient instead
 of MIME `To`/`Cc`; decide explicitly how the application handles missing metadata.
+The dogfooding inbox defaults to strict envelope routing: during a staged upgrade,
+its `ALLOW_LEGACY_EMAIL_ROUTING=true` flag temporarily permits only legacy
+single-To/no-Cc traffic. Deploy the v2 Worker, verify envelope routing, and remove
+that flag. Pause ingress during the transition if legacy multi-recipient traffic
+must not be interrupted. See the [upgrade rehearsal](verification/2026-09-10-install-upgrade.md).
 Identical MIME for separate SMTP recipients is stored separately; retries for the
 same exact recipient remain duplicates. This includes Bcc deliveries without a
 visible recipient header. The envelope format supports ASCII dot-atom addresses
@@ -63,4 +68,6 @@ In an account and mailboxes you control, verify these before production rollout:
 - Queue subscription, event encoding, handler persistence, and acknowledgements.
 - Actual delivered Message-ID and reply threading if using the legacy signed-ID helper.
 
-No live account actions, messages, or releases were performed as part of the automated update.
+The automated suite needs no live account. Separate authorized isolated live runs
+are documented in the [live follow-up](verification/2026-09-10-followup.md).
+The gem has not been published by these verification tasks.
