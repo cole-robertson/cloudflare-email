@@ -87,7 +87,7 @@ Events can be duplicated or arrive out of order. Do not blindly overwrite a newe
 
 ## Processing guarantees
 
-For each message, the consumer decodes the body, validates the event, invokes your handler, and then acknowledges its lease. JSON/bytes queue bodies are base64-decoded; text bodies contain JSON directly.
+For each message, the consumer decodes the body, validates the event, invokes your handler, and then acknowledges its lease. Email Sending subscriptions can return plain JSON strings with `CF-Content-Type: json`; the consumer also accepts base64-encoded JSON for that content type. `bytes` bodies contain base64-encoded JSON, while `text` bodies contain JSON directly. Invalid bodies and events remain unacknowledged.
 
 - A handler that returns normally counts as successful, even if its return value is `false` or `nil`. **Raise** to prevent acknowledgement.
 - A parse error, mismatched account/domain, handler exception, or acknowledgement failure stops the batch. Previously acknowledged messages remain acknowledged; the current and remaining leases become available after the visibility timeout.

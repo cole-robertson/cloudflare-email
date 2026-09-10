@@ -62,7 +62,15 @@ module Cloudflare
         metadata = message["metadata"]
         content_type = metadata.is_a?(Hash) ? metadata["CF-Content-Type"] : nil
         case content_type
-        when "json", "bytes"
+        when "json"
+          # Email Sending subscriptions return plain JSON strings from HTTP
+          # pull. Also accept the base64 JSON transport used by other producers.
+          begin
+            body = JSON.parse(body)
+          rescue JSON::ParserError
+            body = JSON.parse(Base64.strict_decode64(body))
+          end
+        when "bytes"
           body = JSON.parse(Base64.strict_decode64(body))
         when "text"
           body = JSON.parse(body)

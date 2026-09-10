@@ -69,6 +69,26 @@ class EventConsumerTest < Minitest::Test
     assert_not_requested :post, endpoint("ack")
   end
 
+  def test_decodes_real_email_sending_subscription_plain_json_transport
+    # Structure captured from a live HTTP pull; identifiers/content replaced,
+    # and queue message id / live lease deliberately excluded from the fixture.
+    message = JSON.parse(File.read(File.join(__dir__, "fixtures/email_sending_queue_message.json")))
+    refute message.key?("lease_id")
+    refute message.key?("id")
+    message["lease_id"] = "lease-123"
+    stub_pull([message])
+    ack = stub_ack
+    count = @consumer.poll do |event|
+      assert_equal "message-456", event.message_id
+      assert_equal "delivered", event.status
+      assert_equal "recipient@example.net", event.recipient
+      assert event.terminal?
+      assert_not_requested ack
+    end
+    assert_equal 1, count
+    assert_requested ack, times: 1
+  end
+
   def test_requires_handler_before_pulling
     assert_raises(ArgumentError) { @consumer.poll }
     assert_not_requested :post, endpoint("pull")
@@ -100,6 +120,14 @@ class EventConsumerTest < Minitest::Test
       queue_message.merge("metadata" => { "CF-Content-Type" => "v8" }),
       queue_message.merge("lease_id" => ""),
       queue_message({ "unrelated" => true }),
+      queue_message.merge("body" => '{"unrelated":true}'),
+      queue_message.merge("body" => '{"type":'),
+      queue_message.merge("body" => "null"),
+      queue_message.merge("body" => "[]"),
+      queue_message.merge("body" => JSON.generate("not an event")),
+      queue_message.merge("body" => nil),
+      queue_message.merge("body" => event_data),
+      queue_message.merge("body" => JSON.generate(event_data.merge("metadata" => { "accountId" => ACCOUNT_ID, "eventSchemaVersion" => 2 }))),
     ]
     invalid.each do |raw|
       WebMock.reset!
