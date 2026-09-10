@@ -70,8 +70,8 @@ def check(condition, description)
   puts "PASS: #{description}"
 end
 
-def http_request(port, body: nil)
-  path = body ? "/cdn-cgi/local/email?from=sender@example.test&to=inbox@example.test" : "/"
+def http_request(port, body: nil, to: "inbox@example.test")
+  path = body ? "/cdn-cgi/local/email?from=sender@example.test&to=#{URI.encode_www_form_component(to)}" : "/"
   request = body ? Net::HTTP::Post.new(path) : Net::HTTP::Get.new(path)
   if body
     request["Content-Type"] = "message/rfc822"
@@ -175,11 +175,19 @@ begin
         check(response.is_a?(Net::HTTPSuccess), "workerd accepts valid synthetic email")
         check(ActionMailbox::InboundEmail.count == before + 1, "real Rails ingress persists exactly one message")
         inbound = ActionMailbox::InboundEmail.last
+        check(Cloudflare::Email::Envelope.for(inbound) == { "from" => "sender@example.test", "to" => "inbox@example.test" },
+          "workerd authenticates SMTP envelope independently of MIME")
         check(inbound.raw_email.download == mime, "raw RFC822 bytes survive workerd-to-Rails HTTP unchanged")
         check(inbound.mail.attachments.first.decoded == attachment, "all 256 binary byte values survive attachment delivery")
         duplicate = http_request(worker_port, body: mime)
         check(duplicate.is_a?(Net::HTTPSuccess) && ActionMailbox::InboundEmail.count == before + 1,
           "duplicate delivery is accepted without another inbound record")
+        other_recipient = http_request(worker_port, body: mime, to: "bcc@example.test")
+        check(other_recipient.is_a?(Net::HTTPSuccess) && ActionMailbox::InboundEmail.count == before + 2,
+          "identical MIME addressed to another SMTP recipient persists separately")
+        bcc_inbound = ActionMailbox::InboundEmail.last
+        check(Cloudflare::Email::Envelope.for(bcc_inbound).fetch("to") == "bcc@example.test" && bcc_inbound.raw_email.download == mime,
+          "Bcc routing metadata is trusted and MIME remains unchanged")
         ActionMailbox::RoutingJob.perform_now(inbound)
         check(inbound.reload.delivered? && CaptureMailbox.received_attachment == attachment,
           "real routing job executes mailbox and receives intact attachment")

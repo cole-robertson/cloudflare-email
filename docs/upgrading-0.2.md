@@ -17,6 +17,18 @@
 
 Copy/review the updated Worker files from this gem; the generator does not silently replace your deployed Worker.
 
+Upgrade the Rails gem **before** deploying the v2 Worker. Its HMAC now covers the
+SMTP envelope as well as unchanged MIME. Rails stores that authenticated metadata
+before enqueueing routing jobs. `Cloudflare::Email::Envelope.for(inbound_email)`
+returns a string-keyed `from`/`to` hash, or `nil` for legacy requests. Legacy
+signatures remain accepted, but HTTP/MIME envelope headers are never trusted for
+those requests. Route tenant mailboxes using the trusted SMTP recipient instead
+of MIME `To`/`Cc`; decide explicitly how the application handles missing metadata.
+Identical MIME for separate SMTP recipients is stored separately; retries for the
+same exact recipient remain duplicates. This includes Bcc deliveries without a
+visible recipient header. The envelope format supports ASCII dot-atom addresses
+up to 254 bytes, with a 64-byte local part, and an empty SMTP sender for bounces.
+
 - Node tooling uses a tracked package-lock, `npm ci`, Node 22.12+ (or supported newer), Wrangler 4.131+, and Vitest 5.
 - Include `scripts/wrangler.mjs`, `package-lock.json`, and the updated `wrangler.toml`.
 - Wrangler deploy/dev scripts require `--env development|staging|production`.

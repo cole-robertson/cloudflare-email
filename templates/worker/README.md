@@ -37,11 +37,14 @@ does not change DNS or create routing rules.
 For each inbound message, the Worker:
 
 1. Reads the raw RFC822 bytes from `message.raw`.
-2. Computes `HMAC-SHA256(INGRESS_SECRET, "{unix_timestamp}.{raw_body}")`.
+2. Encodes `{"from": message.from, "to": message.to}` as unpadded base64url JSON,
+   then computes `HMAC-SHA256(INGRESS_SECRET, "v2.{unix_timestamp}.{encoded_envelope}.{raw_body}")`.
 3. POSTs the raw bytes to `RAILS_INGRESS_URL` with:
    - `Content-Type: message/rfc822`
    - `X-CF-Email-Timestamp: <unix seconds>`
    - `X-CF-Email-Signature: <hex digest>`
+   - `X-CF-Email-Signature-Version: 2`
+   - `X-CF-Email-Envelope: <encoded envelope>`
 4. If Rails responds non-2xx, the network fails, or the request exceeds 15 seconds,
    the Worker calls `message.setReject`. Redirects are refused to prevent sending
    message content and the signature to a different endpoint. The Worker does
@@ -52,6 +55,14 @@ The Rails controller verifies the signature in constant time and rejects
 timestamps outside its 5-minute acceptance window. A signature authenticates the
 Worker request, not the original email sender. Captured requests remain valid
 inside that window; Rails deduplicates messages through Action Mailbox.
+
+Upgrade the Rails gem before deploying this Worker. Rails accepts legacy v1
+signatures without trusting any envelope header. With v2 it stores authenticated
+SMTP metadata separately from MIME; applications read it using
+`Cloudflare::Email::Envelope.for(inbound_email)`. Duplicate detection includes the
+exact SMTP recipient, preserving separate To/Cc/Bcc deliveries. The format accepts
+ASCII dot-atom addresses up to 254 bytes (local part up to 64 bytes), plus an empty
+sender for bounce messages. Other address forms are rejected before forwarding.
 
 ## Validate changes
 

@@ -2,6 +2,12 @@
 
 ## 0.2.0 — Unreleased
 
+- Authenticate SMTP envelope sender/recipient with the Worker's v2 HMAC format,
+  persist trusted metadata before routing, and expose `Envelope.for(inbound_email)`.
+  Preserve raw MIME and scope duplicate detection to the exact SMTP recipient.
+  Legacy ingress remains supported without trusted envelope metadata. Upgrade
+  Rails before deploying the updated Worker; see docs/upgrading-0.2.md.
+
 - Verify actual local workerd-to-Rails delivery in CI. This exposed and fixed an
   unsupported fetch redirect mode; use `manual` and reject the 3xx response.
   Add reusable package/fresh-install/task verification and a dated evidence report.

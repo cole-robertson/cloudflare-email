@@ -88,7 +88,7 @@ Cloudflare currently limits ordinary sends to 50 recipients and 5 MiB including 
 
 ## Receive through ActionMailbox
 
-Cloudflare Email Routing invokes an Email Worker. The bundled Worker forwards raw MIME to Rails with HMAC-SHA256 over timestamp + body. Rails verifies the signature and a five-minute timestamp window before storing the message in ActionMailbox.
+Cloudflare Email Routing invokes an Email Worker. The bundled Worker forwards unchanged raw MIME to Rails with a versioned HMAC-SHA256 signature covering the timestamp, SMTP envelope, and body. Rails verifies the signature and a five-minute timestamp window before storing the message in ActionMailbox.
 
 ```sh
 bin/rails generate cloudflare:email:install
@@ -120,15 +120,19 @@ Subdomain provisioning checks configured DNS before creating a rule. It never en
 
 For a zone apex, provisioning may enable Email Routing and its DNS records. Only use this when Cloudflare should handle mail for that apex. `provision_catchall DOMAIN=example.com` changes the **zone-wide** catch-all; a subdomain that resolves to a parent zone is rejected. See [subdomain onboarding](https://developers.cloudflare.com/email-service/configuration/subdomains/).
 
-Replace the scaffolded mailbox's `process` with your application logic. Route by address in `ApplicationMailbox`:
+Replace the scaffolded mailbox's `process` with your application logic. For tenant or mailbox selection, use the authenticated SMTP recipient rather than the sender-controlled MIME `To`/`Cc` headers:
 
 ```ruby
 class ApplicationMailbox < ActionMailbox::Base
-  routing /^support@/i => :support
+  routing ->(inbound) { Cloudflare::Email::Envelope.for(inbound)&.fetch("to")&.match?(/\Asupport@/i) } => :support
 end
 ```
 
-Successful ingress storage returns HTTP 200; duplicate storage returns 200 too. The timestamp window limits request age, but is not a one-time replay ledger. ActionMailbox's duplicate detection handles identical stored messages.
+`Cloudflare::Email::Envelope.for(inbound_email)` returns a string-keyed `{"from" => "sender@example.com", "to" => "support@example.com"}` hash, or `nil` for legacy ingress. The metadata is stored on the raw-email blob before routing jobs enqueue. It does not modify the MIME source. Envelope sender information records the SMTP reverse path; it does not authenticate the human sender. An empty `from` is valid for bounces.
+
+Upgrade Rails before deploying the updated Worker. Legacy signatures remain accepted but never authenticate envelope headers, including similarly named MIME headers. The new Worker requires ASCII dot-atom addresses, at most 254 bytes with a 64-byte local part. Quoted local parts, address literals, and internationalized addresses are not supported by this envelope format.
+
+Successful ingress storage returns HTTP 200; duplicate storage returns 200 too. The timestamp window limits request age, but is not a one-time replay ledger. Version 2 deduplication includes the exact SMTP recipient, so identical MIME delivered to separate To/Cc/Bcc recipients creates separate inbound records while a retry for the same recipient creates none.
 
 The Worker has a 15-second Rails request timeout and rejects redirects. Non-2xx responses, timeouts, and network failures call `message.setReject`. There is no durable buffering of inbound email: an application outage can reject mail. Storage acceptance does not guarantee later mailbox-job success. Monitor Rails jobs and Cloudflare Worker logs.
 

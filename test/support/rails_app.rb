@@ -184,12 +184,77 @@ class RailsAppTest < Minitest::Test
       Rails.env = original_env
     end
 
-    def signed_post(body, timestamp: Time.now.to_i.to_s, signature: nil)
-      signature ||= Cloudflare::Email::Verification.sign(secret: ENV.fetch("CLOUDFLARE_INGRESS_SECRET"), body: body, timestamp: timestamp)
+    def signed_post(body, timestamp: Time.now.to_i.to_s, signature: nil, version: nil, envelope: nil)
+      signature ||= Cloudflare::Email::Verification.sign(secret: ENV.fetch("CLOUDFLARE_INGRESS_SECRET"), body: body,
+        timestamp: timestamp, version: version, envelope: envelope)
       post "/rails/action_mailbox/cloudflare/inbound_emails", body,
         "CONTENT_TYPE" => "message/rfc822",
         "HTTP_X_CF_EMAIL_TIMESTAMP" => timestamp,
-        "HTTP_X_CF_EMAIL_SIGNATURE" => signature
+        "HTTP_X_CF_EMAIL_SIGNATURE" => signature,
+        "HTTP_X_CF_EMAIL_SIGNATURE_VERSION" => version,
+        "HTTP_X_CF_EMAIL_ENVELOPE" => envelope
+    end
+
+    def test_v2_preserves_mime_and_commits_trusted_envelope_before_routing
+      body = "From: visible@example.com\r\nTo: unrelated@example.com\r\nMessage-ID: <trusted-metadata@example.com>\r\n\r\nBody\r\n"
+      envelope = Cloudflare::Email::Envelope.encode(from: "smtp@example.com", to: "bcc@example.com")
+      observed = nil
+      ActionMailbox::RoutingJob.stub(:perform_later, ->(inbound) { observed = Cloudflare::Email::Envelope.for(inbound.reload) }) do
+        signed_post(body, version: "2", envelope: envelope)
+      end
+      assert_equal 200, last_response.status, last_response.body
+      assert_equal({ "from" => "smtp@example.com", "to" => "bcc@example.com" }, observed)
+      inbound = ActionMailbox::InboundEmail.find_by!(message_id: "trusted-metadata@example.com")
+      assert_equal observed, Cloudflare::Email::Envelope.for(inbound.reload)
+      assert_equal body, inbound.raw_email.download
+      assert_equal ["unrelated@example.com"], inbound.mail.to
+    end
+
+    def test_v2_deduplication_is_scoped_to_exact_smtp_recipient
+      body = "From: sender@example.com\r\nTo: visible@example.com\r\nMessage-ID: <multi-recipient@example.com>\r\n\r\nSame source\r\n"
+      before = ActionMailbox::InboundEmail.count
+      recipients = %w[visible@example.com cc@example.com bcc@example.com]
+      recipients.each do |recipient|
+        envelope = Cloudflare::Email::Envelope.encode(from: "sender@example.com", to: recipient)
+        2.times do
+          signed_post(body, version: "2", envelope: envelope)
+          assert_equal 200, last_response.status, last_response.body
+        end
+      end
+      # Replays do not rewrite the trusted metadata already attached to a source.
+      signed_post(body, version: "2", envelope: Cloudflare::Email::Envelope.encode(from: "different-sender@example.com", to: recipients.first))
+      assert_equal 200, last_response.status
+      assert_equal before + 3, ActionMailbox::InboundEmail.count
+      rows = ActionMailbox::InboundEmail.where(message_id: "multi-recipient@example.com")
+      assert_equal recipients.sort, rows.map { |row| Cloudflare::Email::Envelope.for(row).fetch("to") }.sort
+      rows.each do |row|
+        assert_equal body, row.raw_email.download
+        assert_equal "sender@example.com", Cloudflare::Email::Envelope.for(row).fetch("from")
+      end
+    end
+
+    def test_legacy_ingress_never_trusts_envelope_headers_or_mime_headers
+      envelope = Cloudflare::Email::Envelope.encode(from: "smtp@example.com", to: "spoofed@example.com")
+      body = "From: sender@example.com\r\nTo: visible@example.com\r\nMessage-ID: <legacy-untrusted@example.com>\r\nX-CF-Email-Envelope: #{envelope}\r\n\r\nBody\r\n"
+      signed_post(body, envelope: envelope)
+      assert_equal 200, last_response.status
+      inbound = ActionMailbox::InboundEmail.find_by!(message_id: "legacy-untrusted@example.com")
+      assert_nil Cloudflare::Email::Envelope.for(inbound)
+      assert_equal body, inbound.raw_email.download
+    end
+
+    def test_v2_rejects_invalid_or_tampered_envelope_without_persistence
+      body = "From: sender@example.com\r\nTo: visible@example.com\r\nMessage-ID: <invalid-envelope@example.com>\r\n\r\nBody\r\n"
+      valid = Cloudflare::Email::Envelope.encode(from: "sender@example.com", to: "visible@example.com")
+      timestamp = Time.now.to_i.to_s
+      signature = Cloudflare::Email::Verification.sign(secret: ENV.fetch("CLOUDFLARE_INGRESS_SECRET"),
+        body: body, timestamp: timestamp, version: "2", envelope: valid)
+      before = ActionMailbox::InboundEmail.count
+      [nil, "!", "x" * 1025, Cloudflare::Email::Envelope.encode(from: "sender@example.com", to: "different@example.com")].each do |changed|
+        signed_post(body, timestamp: timestamp, version: "2", envelope: changed, signature: signature)
+        assert_equal 401, last_response.status
+      end
+      assert_equal before, ActionMailbox::InboundEmail.count
     end
 
     def test_real_ingress_persists_raw_message_and_acknowledges_duplicate

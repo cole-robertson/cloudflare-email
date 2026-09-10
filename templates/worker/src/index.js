@@ -2,7 +2,7 @@
  * Cloudflare Email Worker → Rails ActionMailbox ingress.
  *
  * Receives mail via Cloudflare Email Routing, signs the raw RFC822 with
- * HMAC-SHA256 over "{timestamp}.{raw_body}", and POSTs it to the Rails
+ * HMAC-SHA256 over "v2.{timestamp}.{encoded_envelope}.{raw_body}", and POSTs it to the Rails
  * ingress controller shipped with the cloudflare-email gem.
  *
  * Required environment variables (set via `wrangler secret put` OR the
@@ -33,6 +33,17 @@ async function sign(secret, data) {
   return toHex(sig);
 }
 
+function validAddress(address, allowEmpty = false) {
+  if (typeof address !== "string" || address.length > 254 || /[^\x21-\x7E]/.test(address)) return false;
+  if (allowEmpty && address === "") return true;
+  const parts = address.split("@");
+  if (parts.length !== 2) return false;
+  const [local, domain] = parts;
+  return local.length <= 64 && /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+$/.test(local) &&
+    !local.startsWith(".") && !local.endsWith(".") && !local.includes("..") &&
+    domain.split(".").every(label => /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/.test(label));
+}
+
 export default {
   async email(message, env) {
     if (!env.RAILS_INGRESS_URL || !env.INGRESS_SECRET) {
@@ -40,10 +51,18 @@ export default {
       return;
     }
 
+    if (!validAddress(message.from, true) || !validAddress(message.to)) {
+      message.setReject("worker received invalid SMTP envelope");
+      return;
+    }
+    // Routing metadata comes from the SMTP envelope, never from MIME headers.
+    const envelope = btoa(JSON.stringify({ from: message.from, to: message.to }))
+      .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+
     const raw = new Uint8Array(await new Response(message.raw).arrayBuffer());
     const ts = Math.floor(Date.now() / 1000).toString();
 
-    const tsBytes = new TextEncoder().encode(`${ts}.`);
+    const tsBytes = new TextEncoder().encode(`v2.${ts}.${envelope}.`);
     const signedPayload = new Uint8Array(tsBytes.length + raw.length);
     signedPayload.set(tsBytes, 0);
     signedPayload.set(raw, tsBytes.length);
@@ -60,6 +79,8 @@ export default {
           "Content-Type": "message/rfc822",
           "X-CF-Email-Timestamp": ts,
           "X-CF-Email-Signature": signature,
+          "X-CF-Email-Signature-Version": "2",
+          "X-CF-Email-Envelope": envelope,
         },
         body: raw,
         signal: controller.signal,

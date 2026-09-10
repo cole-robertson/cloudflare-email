@@ -19,9 +19,9 @@ function makeMessage(raw: string) {
   };
 }
 
-async function verifyHmac(secret: string, ts: string, body: ArrayBuffer, hex: string) {
+async function verifyHmac(secret: string, ts: string, envelope: string, body: ArrayBuffer, hex: string) {
   const enc = new TextEncoder();
-  const prefix = enc.encode(`${ts}.`);
+  const prefix = enc.encode(`v2.${ts}.${envelope}.`);
   const signed = new Uint8Array(prefix.length + body.byteLength);
   signed.set(prefix, 0);
   signed.set(new Uint8Array(body), prefix.length);
@@ -73,6 +73,11 @@ describe("cloudflare-email Worker", () => {
     expect(opts.headers["Content-Type"]).toBe("message/rfc822");
     const ts = opts.headers["X-CF-Email-Timestamp"];
     const sig = opts.headers["X-CF-Email-Signature"];
+    const envelope = opts.headers["X-CF-Email-Envelope"];
+    expect(opts.headers["X-CF-Email-Signature-Version"]).toBe("2");
+    expect(JSON.parse(atob(envelope.replace(/-/g, "+").replace(/_/g, "/")))).toEqual({
+      from: "sender@external.test", to: "inbox@trial.test",
+    });
     expect(ts).toMatch(/^\d+$/);
     expect(sig).toMatch(/^[0-9a-f]{64}$/);
 
@@ -81,7 +86,7 @@ describe("cloudflare-email Worker", () => {
     expect(new TextDecoder().decode(sentBytes)).toBe(RAW);
 
     // And the signature verifies against the input.
-    const ok = await verifyHmac(SECRET, ts, sentBytes.buffer, sig);
+    const ok = await verifyHmac(SECRET, ts, envelope, sentBytes.buffer, sig);
     expect(ok).toBe(true);
   });
 
@@ -94,6 +99,39 @@ describe("cloudflare-email Worker", () => {
 
     expect(rejects).toEqual(["upstream returned 503"]);
   });
+
+  it("authenticates SMTP recipients independently of sender-controlled To headers", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(1_750_000_000_000);
+    const env = { RAILS_INGRESS_URL: URL_, INGRESS_SECRET: SECRET };
+    await worker.email(makeMessage(RAW).message as any, env);
+    const other = makeMessage(RAW);
+    other.message.to = "bcc@trial.test";
+    await worker.email(other.message as any, env);
+    const first = fetchSpy.mock.calls[0][1];
+    const second = fetchSpy.mock.calls[1][1];
+    expect(second.body).toEqual(first.body);
+    expect(second.headers["X-CF-Email-Signature"]).not.toBe(first.headers["X-CF-Email-Signature"]);
+    expect(await verifyHmac(SECRET, first.headers["X-CF-Email-Timestamp"], second.headers["X-CF-Email-Envelope"],
+      first.body.buffer, first.headers["X-CF-Email-Signature"])).toBe(false);
+  });
+
+  it("allows the empty SMTP reverse path used by bounce messages", async () => {
+    const { message, rejects } = makeMessage(RAW);
+    message.from = "";
+    await worker.email(message as any, { RAILS_INGRESS_URL: URL_, INGRESS_SECRET: SECRET });
+    expect(rejects).toEqual([]);
+    expect(fetchSpy).toHaveBeenCalledOnce();
+  });
+
+  it.each(["", "Name <recipient@test.example>", "bad\r\n@test.example", "bad\n@test.example", "x@test.example\n", "x@-bad.example", "x@bad..example", "a".repeat(65) + "@example.com"])(
+    "rejects invalid SMTP recipient %j before posting", async (address) => {
+      const { message, rejects } = makeMessage(RAW);
+      message.to = address;
+      await worker.email(message as any, { RAILS_INGRESS_URL: URL_, INGRESS_SECRET: SECRET });
+      expect(rejects).toEqual(["worker received invalid SMTP envelope"]);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    },
+  );
 
   it("rejects the message when RAILS_INGRESS_URL is missing", async () => {
     const env = { RAILS_INGRESS_URL: "", INGRESS_SECRET: SECRET };
