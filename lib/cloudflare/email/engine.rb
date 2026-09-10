@@ -13,7 +13,17 @@ module Cloudflare
     class Engine < ::Rails::Engine
       isolate_namespace Cloudflare::Email
 
+      config.before_initialize do
+        unless defined?(::ActionMailbox::Engine)
+          Rails.autoloaders.main.ignore(
+            File.expand_path("../../../app/controllers/cloudflare/email/ingress_controller.rb", __dir__),
+          )
+        end
+      end
+
       initializer "cloudflare-email.routes" do |app|
+        next unless defined?(::ActionMailbox::Engine)
+
         app.routes.append do
           post "/rails/action_mailbox/cloudflare/inbound_emails",
                to: "cloudflare/email/ingress#create",

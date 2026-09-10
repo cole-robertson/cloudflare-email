@@ -17,7 +17,7 @@
 node_modules/
 templates/worker/node_modules/
 templates/worker/.wrangler/
-templates/worker/package-lock.json
+templates/worker/.dev.vars*
 
 # Dogfood fixtures — not part of the gem
 /trial/

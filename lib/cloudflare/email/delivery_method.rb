@@ -25,6 +25,9 @@ module Cloudflare
           base_url:    settings[:base_url] || Cloudflare::Email::Client::DEFAULT_BASE_URL,
           retries:     settings.fetch(:retries,  Cloudflare::Email::Client::DEFAULT_RETRIES),
           timeout:     settings.fetch(:timeout,  Cloudflare::Email::Client::DEFAULT_TIMEOUT),
+          initial_backoff: settings.fetch(:initial_backoff, Cloudflare::Email::Client::DEFAULT_BACKOFF),
+          max_retry_after: settings.fetch(:max_retry_after, Cloudflare::Email::Client::MAX_RETRY_AFTER),
+          retry_ambiguous: settings.fetch(:retry_ambiguous, false),
           logger:      settings[:logger],
         )
 

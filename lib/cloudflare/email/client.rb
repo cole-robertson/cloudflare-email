@@ -1,6 +1,7 @@
 require "net/http"
 require "json"
 require "uri"
+require "time"
 
 module Cloudflare
   module Email
@@ -12,17 +13,18 @@ module Cloudflare
       MAX_RETRY_AFTER  = 60 # seconds; never sleep longer than this even if server says so
 
       RETRYABLE_NETWORK = [
-        Net::OpenTimeout, Net::ReadTimeout, Errno::ECONNRESET,
+        Net::OpenTimeout, Net::ReadTimeout, Net::WriteTimeout, Errno::ECONNRESET,
         Errno::ECONNREFUSED, Errno::EHOSTUNREACH, EOFError, SocketError,
         IOError
       ].freeze
+      PRE_SEND_NETWORK = [Net::OpenTimeout, Errno::ECONNREFUSED, Errno::EHOSTUNREACH, SocketError].freeze
 
       attr_reader :account_id, :base_url, :retries, :timeout
 
       def initialize(account_id:, api_token:, base_url: DEFAULT_BASE_URL,
                      retries: DEFAULT_RETRIES, timeout: DEFAULT_TIMEOUT,
                      initial_backoff: DEFAULT_BACKOFF, max_retry_after: MAX_RETRY_AFTER,
-                     logger: nil)
+                     retry_ambiguous: false, logger: nil)
         raise ConfigurationError, "account_id is required" if account_id.nil? || account_id.to_s.empty?
         raise ConfigurationError, "api_token is required"  if api_token.nil?  || api_token.to_s.empty?
 
@@ -34,17 +36,19 @@ module Cloudflare
         @initial_backoff = initial_backoff
         @max_retry_after = max_retry_after
         @logger          = logger
+        @retry_ambiguous = retry_ambiguous
       end
 
-      def send(from:, to:, subject:, text: nil, html: nil, cc: nil, bcc: nil,
+      def send(from:, subject:, to: nil, text: nil, html: nil, cc: nil, bcc: nil,
                reply_to: nil, headers: nil, attachments: nil)
         raise ValidationError, "must provide :text or :html" if text.nil? && html.nil?
+        raise ValidationError, "must provide a recipient in :to, :cc, or :bcc" if [to, cc, bcc].all? { |v| wrap(v).empty? }
 
         body = {
           from:    normalize_address(from),
-          to:      wrap(to).map  { |addr| normalize_address(addr) },
           subject: subject,
         }
+        body[:to]          = wrap(to).map { |addr| normalize_address(addr) } if to
         body[:text]        = text if text
         body[:html]        = html if html
         body[:cc]          = wrap(cc).map  { |a| normalize_address(a) } if cc
@@ -104,6 +108,10 @@ module Cloudflare
           response = request(:post, path, body)
           payload[:status]     = response.status
           payload[:message_id] = response.message_id
+          payload[:delivered] = response.delivered
+          payload[:queued] = response.queued
+          payload[:permanent_bounces] = response.permanent_bounces
+          payload[:suppressed_recipients] = response.suppressed_recipients
           response
         end
       end
@@ -125,6 +133,9 @@ module Cloudflare
           attempts += 1
           do_request(method, uri, body)
         rescue *RETRYABLE_NETWORK => e
+          unless PRE_SEND_NETWORK.any? { |type| e.is_a?(type) } || @retry_ambiguous
+            raise NetworkError.new("#{e.message}; delivery outcome is unknown; automatic retry disabled")
+          end
           raise NetworkError.new(e.message) if attempts > @retries
           log_retry(attempts, e)
           sleep(backoff); backoff *= 2
@@ -135,7 +146,7 @@ module Cloudflare
           sleep(retry_after_from(e, backoff)); backoff *= 2
           retry
         rescue ServerError => e
-          raise if attempts > @retries
+          raise unless @retry_ambiguous && attempts <= @retries
           log_retry(attempts, e)
           sleep(backoff); backoff *= 2
           retry
@@ -145,7 +156,15 @@ module Cloudflare
       def retry_after_from(error, fallback_backoff)
         header = error.response.is_a?(Hash) ? error.response["retry_after"] : nil
         value  = header || fallback_backoff
-        seconds = value.to_f
+        seconds = if value.to_s.match?(/\A\d+(?:\.\d+)?\z/)
+          value.to_f
+        else
+          begin
+            Time.httpdate(value.to_s) - Time.now
+          rescue ArgumentError
+            fallback_backoff
+          end
+        end
         return fallback_backoff if seconds <= 0
         [seconds, @max_retry_after].min
       end
@@ -155,6 +174,8 @@ module Cloudflare
         http.use_ssl     = (uri.scheme == "https")
         http.open_timeout = @timeout
         http.read_timeout = @timeout
+        http.write_timeout = @timeout
+        http.max_retries = 0
 
         req_class = { post: Net::HTTP::Post, get: Net::HTTP::Get }.fetch(method)
         req = req_class.new(uri.request_uri)
@@ -178,6 +199,15 @@ module Cloudflare
 
         case status
         when 200..299
+          if body.is_a?(Hash) && body["success"] == false
+            raise Error.new(extract_message(body), status: status, response: body)
+          end
+          unless body.is_a?(Hash) && body["result"].is_a?(Hash)
+            raise Error.new("invalid successful API response; request outcome is unknown", status: status, response: body)
+          end
+          if body["errors"].is_a?(Array) && body["errors"].any?
+            raise Error.new(extract_message(body), status: status, response: body)
+          end
           Response.new(body, status: status)
         when 400, 422
           raise ValidationError.new(extract_message(body), status: status, response: body)

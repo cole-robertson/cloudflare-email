@@ -35,6 +35,10 @@ module Cloudflare
         Array(result["permanent_bounces"])
       end
 
+      def suppressed_recipients
+        Array(result["suppressed_recipients"])
+      end
+
       def errors
         Array(@raw["errors"])
       end

@@ -1,15 +1,18 @@
 {
   "name": "cloudflare-email-ingress",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
+  "type": "module",
+  "engines": { "node": "^22.12.0 || ^24.0.0 || >=26.0.0" },
   "description": "Cloudflare Email Worker that forwards inbound mail to a Rails ActionMailbox ingress (HMAC-signed).",
   "scripts": {
-    "deploy": "wrangler deploy",
-    "dev": "wrangler dev",
+    "deploy": "node scripts/wrangler.mjs deploy",
+    "dev": "node scripts/wrangler.mjs dev",
+    "check": "wrangler deploy --env development --dry-run",
     "test": "vitest run"
   },
   "devDependencies": {
-    "vitest": "^3.2.0",
-    "wrangler": "^4.0.0"
+    "vitest": "^5.0.0",
+    "wrangler": "^4.131.0"
   }
 }

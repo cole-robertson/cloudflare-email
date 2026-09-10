@@ -4,7 +4,7 @@ require "uri"
 
 module Cloudflare
   module Email
-    # Provision Cloudflare Email Routing rules via API — no dashboard clicks.
+    # Provision Cloudflare Email Routing rules via API.
     #
     # Looks up the zone ID for a domain, enables Email Routing on the zone
     # (publishing the MX + SPF records Cloudflare needs), and creates/updates
@@ -13,6 +13,8 @@ module Cloudflare
     # Required API token scopes:
     #   Zone → Zone → Read          (to look up zone by name)
     #   Zone → Email Routing → Edit (to enable routing and add rules)
+    #   Zone → DNS → Read           (to check preconfigured subdomains)
+    #   Zone → Zone Settings → Edit (to enable apex routing)
     #
     # Usage:
     #   provisioner = Cloudflare::Email::RoutingProvisioner.new(
@@ -36,14 +38,22 @@ module Cloudflare
       # is safe and will update the existing rule rather than duplicate it.
       def provision(address:, worker_name:)
         domain   = extract_domain(address)
-        zone_id  = find_zone_id_for(domain)
-        raise Error.new("No Cloudflare zone found for #{domain} — add the domain to your account first") unless zone_id
+        zone = find_zone_for(domain)
+        raise Error.new("No Cloudflare zone found for #{domain} — add the domain to your account first") unless zone
 
-        enable_routing_if_needed(zone_id)
-        upsert_route(zone_id: zone_id, address: address, worker_name: worker_name)
+        if zone["name"] == domain
+          enable_routing_if_needed(zone["id"])
+        else
+          check_subdomain_dns!(zone_id: zone["id"], domain: domain)
+        end
+        upsert_route(zone_id: zone["id"], address: address, worker_name: worker_name)
       end
 
       def find_zone_id_for(domain)
+        find_zone_for(domain)&.fetch("id")
+      end
+
+      def find_zone_for(domain)
         # Try the exact domain, then walk up parent domains until we find a
         # Cloudflare zone. Supports subdomains like "in.example.com" routing
         # to the "example.com" zone.
@@ -52,35 +62,35 @@ module Cloudflare
         candidates.each do |candidate|
           result = api_request(:get, "/zones?name=#{URI.encode_www_form_component(candidate)}")
           zones = Array(result["result"])
-          return zones.first["id"] if zones.any?
+          return zones.first.merge("name" => candidate) if zones.any?
         end
 
         nil
       end
 
       def enable_routing_if_needed(zone_id)
-        # This endpoint requires the "Email Routing Settings" permission group,
-        # which most scoped tokens don't carry. If we can read the setting,
-        # enable when off. If we can't (403), assume the user enabled routing
-        # via the dashboard when they added the subdomain — the subsequent
-        # rule create will fail with a clear error if not.
-        current = raw_api_request(:get, "/zones/#{zone_id}/email/routing")
-        status  = current.code.to_i
-
-        case status
-        when 200
-          body    = parse(current.body)
-          enabled = body.dig("result", "enabled")
-          api_request(:post, "/zones/#{zone_id}/email/routing/enable") unless enabled
-        when 403, 404
-          # Either the token can't read settings or routing isn't set up.
-          # Try to enable optimistically; ignore failure (rule create will
-          # surface a precise error if routing is actually off).
-          attempt = raw_api_request(:post, "/zones/#{zone_id}/email/routing/enable")
-          # Don't fail here even if this also 403s — move on to rule creation.
-        else
-          handle!(current, "GET /zones/#{zone_id}/email/routing")
+        current = api_request(:get, "/zones/#{zone_id}/email/routing")
+        unless [true, false].include?(current.dig("result", "enabled"))
+          raise Error.new("Email Routing settings response did not include an enabled flag; no routing settings were changed")
         end
+        return if current.dig("result", "enabled") == true
+
+        api_request(:post, "/zones/#{zone_id}/email/routing/dns")
+      end
+
+      # Cloudflare's documented subdomain onboarding is dashboard-only. Check
+      # its DNS prerequisites without ever modifying the parent zone's routing.
+      # This checks configured records, not propagation or live delivery.
+      def check_subdomain_dns!(zone_id:, domain:)
+        records = paginated_results("/zones/#{zone_id}/dns_records?name=#{URI.encode_www_form_component(domain)}")
+        mx = records.select { |r| r["type"] == "MX" }.map { |r| r["content"].to_s.downcase.delete_suffix(".") }.uniq.sort
+        expected_mx = (1..3).map { |n| "route#{n}.mx.cloudflare.net" }
+        spf = records.select { |r| r["type"] == "TXT" }.map { |r| r["content"].to_s.delete('"') }.select { |v| v.start_with?("v=spf1 ") }
+        return if mx == expected_mx && spf.size == 1 && spf.first.split.include?("include:_spf.mx.cloudflare.net")
+
+        raise Error.new("Email Routing DNS for #{domain} is missing or conflicts with another mail provider. " \
+          "In Cloudflare, open Email Routing > the apex domain > Settings > Subdomains and onboard #{domain}; " \
+          "then retry after checking its routing MX and SPF records. Parent-zone routing was not changed.")
       end
 
       def upsert_route(zone_id:, address:, worker_name:)
@@ -110,18 +120,14 @@ module Cloudflare
       end
 
       def find_rule_for(zone_id:, address:)
-        result = api_request(:get, "/zones/#{zone_id}/email/routing/rules?per_page=50")
-        rules  = Array(result["result"])
-
-        rules.find do |r|
+        list_rules(zone_id).find do |r|
           matchers = Array(r["matchers"])
-          matchers.any? { |m| m["field"] == "to" && m["value"] == address }
+          matchers.size == 1 && matchers.any? { |m| m["field"] == "to" && m["type"] == "literal" && m["value"] == address }
         end
       end
 
       def list_rules(zone_id)
-        result = api_request(:get, "/zones/#{zone_id}/email/routing/rules?per_page=50")
-        Array(result["result"])
+        paginated_results("/zones/#{zone_id}/email/routing/rules")
       end
 
       # Point the zone's catch-all rule at our Worker. Catch-all matches any
@@ -141,21 +147,40 @@ module Cloudflare
       end
 
       def provision_catch_all_for_domain(domain:, worker_name:)
-        zone_id = find_zone_id_for(domain)
-        raise Error.new("No Cloudflare zone found for #{domain}") unless zone_id
+        domain = domain.to_s.downcase.delete_suffix(".")
+        zone = find_zone_for(domain)
+        raise Error.new("No Cloudflare zone found for #{domain}") unless zone
+        unless zone["name"] == domain
+          raise Error.new("Catch-all rules are zone-wide: #{domain} belongs to zone #{zone['name']}. " \
+            "This task cannot scope a catch-all to a subdomain. Use explicit address routes or configure subdomain handling in the dashboard.")
+        end
 
-        enable_routing_if_needed(zone_id)
-        provision_catch_all(zone_id: zone_id, worker_name: worker_name)
+        enable_routing_if_needed(zone["id"])
+        provision_catch_all(zone_id: zone["id"], worker_name: worker_name)
       end
 
       private
 
-      def extract_domain(address)
-        if address.include?("@")
-          address.split("@", 2).last
-        else
-          address
+      def paginated_results(path)
+        records = []
+        page = 1
+        loop do
+          separator = path.include?("?") ? "&" : "?"
+          result = api_request(:get, "#{path}#{separator}per_page=50&page=#{page}")
+          batch = Array(result["result"])
+          records.concat(batch)
+          total_pages = result.dig("result_info", "total_pages")
+          break if batch.empty? || (total_pages ? page >= total_pages.to_i : batch.size < 50)
+          page += 1
         end
+        records
+      end
+
+      def extract_domain(address)
+        unless address.to_s.match?(/\A[^\s@]+@[^\s@]+\z/)
+          raise ArgumentError, "address must be a full email address"
+        end
+        address.split("@", 2).last.downcase.delete_suffix(".")
       end
 
       # "a.b.c.example.com" → ["a.b.c.example.com", "b.c.example.com", "c.example.com", "example.com"]
@@ -196,9 +221,9 @@ module Cloudflare
 
       def handle!(response, context)
         status = response.code.to_i
-        return if status.between?(200, 299)
-
         body    = parse(response.body)
+        return if status.between?(200, 299) && body.is_a?(Hash) && body["success"] != false && body.key?("result")
+
         errors  = body.is_a?(Hash) ? Array(body["errors"]) : []
         message = errors.map { |e| e.is_a?(Hash) ? e["message"] : e.to_s }.compact.join("; ")
         message = "HTTP #{status}" if message.empty?

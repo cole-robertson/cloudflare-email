@@ -1,0 +1,46 @@
+{
+  "date": "2026-09-10",
+  "domain": "test.rebulk.com",
+  "gem_fix_commit": "3fda75aa7cd5c54fc7753676e340d1deef4f0ce4",
+  "checks": {
+    "structured_delivery_copies": 3,
+    "cc_present": true,
+    "bcc_header_absent": true,
+    "text_and_html_received": true,
+    "domain_dkim_and_dmarc_pass": true,
+    "stored_attachment_sha256": "0d42a8b2489dc6e5632cec0b1f06b4f41b61742536d2c3c361edb990e3b945cd",
+    "custom_signed_message_id_preserved": false,
+    "live_reply_returned_to_conversation": 1,
+    "actual_llm_draft_present": true,
+    "duplicate_ingress_status": "200",
+    "invalid_signature_status": "401",
+    "total_received_copies": 6,
+    "auto_send_enabled": false
+  },
+  "outbound_calls": 4,
+  "delivered_events": 6,
+  "duplicate_event_inserted_rows": 0,
+  "empty_final_poll": true,
+  "cleanup": {
+    "removed": [
+      "verify-inbox-20260910@test.rebulk.com",
+      "verify-sender-20260910@test.rebulk.com",
+      "verify-cc-20260910@test.rebulk.com",
+      "verify-bcc-20260910@test.rebulk.com",
+      "cloudflare-email-ingress-verification-20260910",
+      "test-domain event subscription",
+      "cf-email-verify-20260910",
+      "cf-email-verify-20260910-dlq"
+    ],
+    "baseline_rules_exactly_restored": true,
+    "production_catchall_unchanged": true,
+    "remaining_queues": 0,
+    "finished_at": "2026-09-10T20:45:08.856471+00:00"
+  },
+  "limits": [
+    "Inbound Cc/Bcc mailbox selection requires authenticated envelope metadata",
+    "Live LLM quality still needs human review",
+    "DNS preflight needs DNS Read permission",
+    "Only delivered lifecycle events were exercised live"
+  ]
+}

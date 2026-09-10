@@ -48,6 +48,7 @@ class WorkerDeployerTest < Minitest::Test
         body = req.body
         assert_match(/name="metadata"/, body)
         assert_match(/"main_module":"index.js"/, body)
+        assert_match(/"compatibility_date":"2026-09-10"/, body)
         assert_match(/name="index.js"; filename="index.js"/, body)
         assert_match(/Content-Type: application\/javascript\+module/, body)
         assert_match(/export default \{/, body)
@@ -105,6 +106,20 @@ class WorkerDeployerTest < Minitest::Test
 
     make_deployer.put_secret("INGRESS_SECRET", "hunter2")
     assert_requested(stub)
+  end
+
+  def test_rejects_api_failure_inside_successful_http_response
+    stub_request(:put, secrets_url).to_return(status: 200,
+      body: JSON.generate("success" => false, "errors" => [{ "message" => "Secret rejected" }]))
+    error = assert_raises(Cloudflare::Email::Error) { make_deployer.put_secret("INGRESS_SECRET", "secret") }
+    assert_match "Secret rejected", error.message
+  end
+
+  def test_rejects_malformed_successful_responses
+    ["[]", "null", "{}", "not-json"].each do |body|
+      stub_request(:put, script_url).to_return(status: 200, body: body)
+      assert_raises(Cloudflare::Email::Error) { make_deployer.deploy(source: "export default {}") }
+    end
   end
 
   def test_delete_secret

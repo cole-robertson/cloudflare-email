@@ -2,9 +2,8 @@ require "test_helper"
 require "cloudflare/email/verification"
 
 # Unit tests for HMAC verification — the heart of the ingress controller.
-# A full controller integration test requires booting a Rails app with
-# ActionMailbox + ActiveStorage migrations; that's covered by the example
-# Rails app, not here.
+# Rails boot, persistence, duplicate delivery, and generator behavior are
+# exercised separately in rails_integration_test.rb.
 class VerificationTest < Minitest::Test
   SECRET = "test-ingress-secret-very-long-string-1234567890abcdef".freeze
   BODY   = "From: a@b.com\r\nTo: c@d.com\r\nSubject: Hi\r\n\r\nbody\r\n".freeze

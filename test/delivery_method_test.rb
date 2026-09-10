@@ -39,7 +39,7 @@ class DeliveryMethodTest < Minitest::Test
     mail = TestMailer.hello(to: "user@example.com").deliver_now
 
     assert_requested(stub)
-    # Cloudflare API does not return message_id; Mail gem retains its auto-generated one.
+    # This compatibility fixture omits message_id; Mail gem retains its auto-generated one.
     assert mail.message_id, "Mail should still have its auto-generated message_id"
   end
 
@@ -74,6 +74,22 @@ class DeliveryMethodTest < Minitest::Test
     )
     mail = Mail.new(to: "x@y.com", subject: "Hi", body: "Hello")
     assert_raises(Cloudflare::Email::ValidationError) { method.deliver!(mail) }
+  end
+
+  def test_delivery_updates_message_id_from_current_api_response
+    payload = cloudflare_success_body
+    payload["result"]["message_id"] = "platform-id@cloudflare.example"
+    stub_request(:post, send_raw_endpoint).to_return(status: 200, body: JSON.generate(payload))
+    mail = TestMailer.hello(to: "user@example.com").deliver_now
+    assert_equal "platform-id@cloudflare.example", mail.message_id
+  end
+
+  def test_delivery_forwards_ambiguous_retry_opt_in
+    ActionMailer::Base.cloudflare_settings.merge!(retries: 1, initial_backoff: 0, retry_ambiguous: true)
+    request = stub_request(:post, send_raw_endpoint).to_raise(Net::ReadTimeout)
+      .then.to_return(status: 200, body: JSON.generate(cloudflare_success_body))
+    TestMailer.hello(to: "user@example.com").deliver_now
+    assert_requested request, times: 2
   end
 
   def test_raises_when_no_recipients

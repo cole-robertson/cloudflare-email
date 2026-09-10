@@ -1,9 +1,10 @@
 require "cloudflare/email/task_base"
 require "cloudflare/email/client"
+require "time"
 
 module Cloudflare
   module Email
-    # `bin/rails cloudflare:email:send_test TO=... [FROM=...]` — one-shot
+    # `bin/rails cloudflare:email:send_test TO=... FROM=...` — one-shot
     # test send via the current Cloudflare Email config.
     class SendTest < TaskBase
       def self.call(to:, from: nil, io: $stdout)
@@ -17,8 +18,7 @@ module Cloudflare
         require_value!(api_token,  "cloudflare.api_token")
         require_value!(opts[:to],  "TO=recipient@example.com")
 
-        sender = opts[:from] || infer_from
-        raise "Missing FROM= and couldn't infer from verified sending domains" if sender.to_s.empty?
+        sender = require_value!(opts[:from], "FROM=sender@your-verified-domain.example")
 
         say "Sending test email:"
         say "  from: #{sender}"
@@ -39,37 +39,13 @@ module Cloudflare
         )
 
         say "  success:   #{response.success?}"
+        say "  message_id: #{response.message_id}" if response.message_id
         say "  delivered: #{response.delivered.inspect}"
         say "  queued:    #{response.queued.inspect}"           if response.queued.any?
         say "  bounces:   #{response.permanent_bounces.inspect}" if response.permanent_bounces.any?
+        say "  suppressed: #{response.suppressed_recipients.inspect}" if response.suppressed_recipients.any?
       end
 
-      private
-
-      def infer_from
-        require "net/http"
-        require "json"
-
-        uri  = URI.parse("https://api.cloudflare.com/client/v4/accounts/#{account_id}/email/sending/domains")
-        http = Net::HTTP.new(uri.host, uri.port)
-        http.use_ssl = true
-        http.open_timeout = 10
-        http.read_timeout = 10
-
-        req = Net::HTTP::Get.new(uri.request_uri)
-        req["Authorization"] = "Bearer #{api_token}"
-        response = http.request(req)
-        return nil unless response.code.to_i.between?(200, 299)
-
-        domains  = JSON.parse(response.body).dig("result") || []
-        verified = domains.find { |d| d["verified"] == true || d["status"] == "verified" }
-        return nil unless verified
-
-        domain = verified["name"] || verified["domain"]
-        domain.to_s.empty? ? nil : "test@#{domain}"
-      rescue StandardError
-        nil
-      end
     end
   end
 end

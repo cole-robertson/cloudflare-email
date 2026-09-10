@@ -20,8 +20,8 @@ class SecureMessageIdTest < Minitest::Test
     assert_equal({ "thread_id" => 42, "user_id" => 7, "kind" => "ping" }, payload)
   end
 
-  def test_no_size_constraint
-    # 200-char payload in a Message-ID — no local-part size ceiling here.
+  def test_compact_payload_fits_message_id_budget
+    # Message-ID is not a mailbox local-part, but still has a header budget.
     big = { "state" => "x" * 200 }
     id  = encode_fixture(big)
     local = id.split("@").first
@@ -29,6 +29,16 @@ class SecureMessageIdTest < Minitest::Test
 
     decoded = Cloudflare::Email::SecureMessageId.decode(id, secret: SECRET, now: NOW)
     assert_equal big, decoded
+  end
+
+  def test_oversized_payload_is_rejected
+    assert_raises(ArgumentError) { encode_fixture({ "state" => "x" * 1000 }) }
+  end
+
+  def test_empty_decode_secret_is_rejected
+    assert_raises(Cloudflare::Email::SecureMessageId::InvalidToken) do
+      Cloudflare::Email::SecureMessageId.decode(encode_fixture, secret: "", now: NOW)
+    end
   end
 
   def test_format

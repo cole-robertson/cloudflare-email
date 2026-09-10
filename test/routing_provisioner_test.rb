@@ -50,43 +50,31 @@ class RoutingProvisionerTest < Minitest::Test
 
     make.enable_routing_if_needed(ZONE_ID)
 
-    assert_not_requested :post, "https://api.cloudflare.com/client/v4/zones/#{ZONE_ID}/email/routing/enable"
+    assert_not_requested :post, "https://api.cloudflare.com/client/v4/zones/#{ZONE_ID}/email/routing/dns"
   end
 
   def test_enable_routing_called_when_not_enabled
     stub_request(:get, "https://api.cloudflare.com/client/v4/zones/#{ZONE_ID}/email/routing")
       .to_return(status: 200, body: JSON.generate("result" => { "enabled" => false }))
-    stub = stub_request(:post, "https://api.cloudflare.com/client/v4/zones/#{ZONE_ID}/email/routing/enable")
+    stub = stub_request(:post, "https://api.cloudflare.com/client/v4/zones/#{ZONE_ID}/email/routing/dns")
       .to_return(status: 200, body: JSON.generate("result" => { "enabled" => true }))
 
     make.enable_routing_if_needed(ZONE_ID)
     assert_requested(stub)
   end
 
-  def test_enable_routing_called_on_404
-    stub_request(:get, "https://api.cloudflare.com/client/v4/zones/#{ZONE_ID}/email/routing")
-      .to_return(status: 404, body: JSON.generate("errors" => []))
-    stub = stub_request(:post, "https://api.cloudflare.com/client/v4/zones/#{ZONE_ID}/email/routing/enable")
-      .to_return(status: 200, body: JSON.generate("result" => { "enabled" => true }))
-
-    make.enable_routing_if_needed(ZONE_ID)
-    assert_requested(stub)
-  end
-
-  def test_enable_routing_silently_skips_on_403
-    # Some scoped tokens can't read routing settings. We attempt enable
-    # optimistically but don't fail the whole provision flow on 403.
-    stub_request(:get, "https://api.cloudflare.com/client/v4/zones/#{ZONE_ID}/email/routing")
-      .to_return(status: 403, body: JSON.generate("errors" => [{ "message" => "Authentication error" }]))
-    stub_request(:post, "https://api.cloudflare.com/client/v4/zones/#{ZONE_ID}/email/routing/enable")
-      .to_return(status: 403, body: JSON.generate("errors" => [{ "message" => "Authentication error" }]))
-
-    # No exception raised
-    make.enable_routing_if_needed(ZONE_ID)
+  def test_settings_failures_are_not_ignored
+    [403, 404].each do |status|
+      stub_request(:get, "https://api.cloudflare.com/client/v4/zones/#{ZONE_ID}/email/routing")
+        .to_return(status: status, body: JSON.generate("errors" => [{ "message" => "Cannot read settings" }]))
+      error = assert_raises(Cloudflare::Email::Error) { make.enable_routing_if_needed(ZONE_ID) }
+      assert_equal status, error.status
+    end
+    WebMock.assert_not_requested(:post, %r{email/routing/dns})
   end
 
   def test_upsert_creates_rule_when_missing
-    stub_request(:get, "https://api.cloudflare.com/client/v4/zones/#{ZONE_ID}/email/routing/rules?per_page=50")
+    stub_request(:get, "https://api.cloudflare.com/client/v4/zones/#{ZONE_ID}/email/routing/rules?per_page=50&page=1")
       .to_return(status: 200, body: JSON.generate("result" => []))
 
     stub = stub_request(:post, "https://api.cloudflare.com/client/v4/zones/#{ZONE_ID}/email/routing/rules")
@@ -108,7 +96,7 @@ class RoutingProvisionerTest < Minitest::Test
       "id"       => "rule-existing-1",
       "matchers" => [{ "field" => "to", "type" => "literal", "value" => ADDRESS }],
     }
-    stub_request(:get, "https://api.cloudflare.com/client/v4/zones/#{ZONE_ID}/email/routing/rules?per_page=50")
+    stub_request(:get, "https://api.cloudflare.com/client/v4/zones/#{ZONE_ID}/email/routing/rules?per_page=50&page=1")
       .to_return(status: 200, body: JSON.generate("result" => [existing]))
 
     stub = stub_request(:put, "https://api.cloudflare.com/client/v4/zones/#{ZONE_ID}/email/routing/rules/rule-existing-1")
@@ -130,12 +118,11 @@ class RoutingProvisionerTest < Minitest::Test
     stub_request(:get, "https://api.cloudflare.com/client/v4/zones?name=example.com")
       .to_return(status: 200, body: JSON.generate("result" => [{ "id" => ZONE_ID }]))
 
-    # 2. check routing (assume enabled)
-    stub_request(:get, "https://api.cloudflare.com/client/v4/zones/#{ZONE_ID}/email/routing")
-      .to_return(status: 200, body: JSON.generate("result" => { "enabled" => true }))
+    # 2. Check subdomain DNS without reading/enabling parent routing.
+    stub_subdomain_dns
 
     # 3. list rules (empty)
-    stub_request(:get, "https://api.cloudflare.com/client/v4/zones/#{ZONE_ID}/email/routing/rules?per_page=50")
+    stub_request(:get, "https://api.cloudflare.com/client/v4/zones/#{ZONE_ID}/email/routing/rules?per_page=50&page=1")
       .to_return(status: 200, body: JSON.generate("result" => []))
 
     # 4. create rule
@@ -144,6 +131,7 @@ class RoutingProvisionerTest < Minitest::Test
 
     make.provision(address: ADDRESS, worker_name: WORKER)
     assert_requested(create_stub)
+    WebMock.assert_not_requested(:post, %r{email/routing/dns})
   end
 
   def test_provision_catch_all
@@ -170,7 +158,104 @@ class RoutingProvisionerTest < Minitest::Test
     assert_match(/No Cloudflare zone/, err.message)
   end
 
+  def test_subdomain_requires_onboarding_before_rule_mutation
+    stub_zones
+    stub_subdomain_dns([])
+    error = assert_raises(Cloudflare::Email::Error) { make.provision(address: ADDRESS, worker_name: WORKER) }
+    assert_match(/Settings > Subdomains/, error.message)
+    WebMock.assert_not_requested(:post, %r{email/routing})
+  end
+
+  def test_subdomain_rejects_conflicting_mx
+    stub_zones
+    stub_subdomain_dns(routing_dns + [{ "type" => "MX", "content" => "mail.other.example" }])
+    assert_raises(Cloudflare::Email::Error) { make.provision(address: ADDRESS, worker_name: WORKER) }
+    WebMock.assert_not_requested(:post, %r{email/routing})
+  end
+
+  def test_subdomain_dns_permission_failure_stops_rule_creation
+    stub_zones
+    stub_request(:get, "https://api.cloudflare.com/client/v4/zones/#{ZONE_ID}/dns_records?name=#{DOMAIN}&per_page=50&page=1")
+      .to_return(status: 403, body: JSON.generate("errors" => [{ "message" => "DNS Read permission required" }]))
+    error = assert_raises(Cloudflare::Email::Error) { make.provision(address: ADDRESS, worker_name: WORKER) }
+    assert_match(/DNS Read permission required/, error.message)
+    WebMock.assert_not_requested(:post, %r{email/routing})
+  end
+
+  def test_subdomain_rejects_multiple_spf_policies
+    stub_zones
+    stub_subdomain_dns(routing_dns + [{ "type" => "TXT", "content" => "v=spf1 include:other.example ~all" }])
+    assert_raises(Cloudflare::Email::Error) { make.provision(address: ADDRESS, worker_name: WORKER) }
+    WebMock.assert_not_requested(:post, %r{email/routing})
+  end
+
+  def test_malformed_settings_do_not_trigger_enablement
+    stub_request(:get, "https://api.cloudflare.com/client/v4/zones/#{ZONE_ID}/email/routing")
+      .to_return(status: 200, body: JSON.generate("result" => {}))
+    error = assert_raises(Cloudflare::Email::Error) { make.enable_routing_if_needed(ZONE_ID) }
+    assert_match(/enabled flag/, error.message)
+    WebMock.assert_not_requested(:post, %r{email/routing})
+  end
+
+  def test_subdomain_catchall_cannot_change_parent_zone
+    stub_zones
+    error = assert_raises(Cloudflare::Email::Error) { make.provision_catch_all_for_domain(domain: DOMAIN, worker_name: WORKER) }
+    assert_match(/zone-wide/, error.message)
+    WebMock.assert_not_requested(:put, /catch_all/)
+    WebMock.assert_not_requested(:post, %r{email/routing})
+  end
+
+  def test_rule_lookup_follows_pagination
+    stub_request(:get, "https://api.cloudflare.com/client/v4/zones/#{ZONE_ID}/email/routing/rules?per_page=50&page=1")
+      .to_return(status: 200, body: JSON.generate("result" => [{ "id" => "unrelated" }], "result_info" => { "total_pages" => 2 }))
+    existing = { "id" => "later-page", "matchers" => [{ "field" => "to", "type" => "literal", "value" => ADDRESS }] }
+    stub_request(:get, "https://api.cloudflare.com/client/v4/zones/#{ZONE_ID}/email/routing/rules?per_page=50&page=2")
+      .to_return(status: 200, body: JSON.generate("result" => [existing], "result_info" => { "total_pages" => 2 }))
+    update = stub_request(:put, "https://api.cloudflare.com/client/v4/zones/#{ZONE_ID}/email/routing/rules/later-page")
+      .to_return(status: 200, body: JSON.generate("result" => existing))
+    make.upsert_route(zone_id: ZONE_ID, address: ADDRESS, worker_name: WORKER)
+    assert_requested update
+    WebMock.assert_not_requested(:post, %r{email/routing/rules})
+  end
+
+  def test_success_false_response_is_an_error
+    stub_request(:get, "https://api.cloudflare.com/client/v4/zones/#{ZONE_ID}/email/routing")
+      .to_return(status: 200, body: JSON.generate("success" => false, "errors" => [{ "message" => "Denied" }]))
+    error = assert_raises(Cloudflare::Email::Error) { make.enable_routing_if_needed(ZONE_ID) }
+    assert_match(/Denied/, error.message)
+    WebMock.assert_not_requested(:post, %r{email/routing})
+  end
+
+  def test_enable_failure_stops_provisioning
+    stub_request(:get, "https://api.cloudflare.com/client/v4/zones?name=example.com")
+      .to_return(status: 200, body: JSON.generate("result" => [{ "id" => ZONE_ID }]))
+    stub_request(:get, "https://api.cloudflare.com/client/v4/zones/#{ZONE_ID}/email/routing")
+      .to_return(status: 200, body: JSON.generate("result" => { "enabled" => false }))
+    stub_request(:post, "https://api.cloudflare.com/client/v4/zones/#{ZONE_ID}/email/routing/dns")
+      .to_return(status: 403, body: JSON.generate("errors" => [{ "message" => "Insufficient permissions" }]))
+    assert_raises(Cloudflare::Email::Error) { make.provision(address: "user@example.com", worker_name: WORKER) }
+    WebMock.assert_not_requested(:post, %r{email/routing/rules})
+  end
+
   private
+
+  def stub_zones
+    stub_request(:get, "https://api.cloudflare.com/client/v4/zones?name=in.example.com")
+      .to_return(status: 200, body: JSON.generate("result" => []))
+    stub_request(:get, "https://api.cloudflare.com/client/v4/zones?name=example.com")
+      .to_return(status: 200, body: JSON.generate("result" => [{ "id" => ZONE_ID, "name" => PARENT }]))
+  end
+
+  def routing_dns
+    (1..3).map { |n| { "type" => "MX", "content" => "route#{n}.mx.cloudflare.net" } } +
+      [{ "type" => "TXT", "content" => "v=spf1 include:_spf.mx.cloudflare.net ~all" }]
+  end
+
+  def stub_subdomain_dns(records = routing_dns)
+    stub_request(:get, "https://api.cloudflare.com/client/v4/zones/#{ZONE_ID}/dns_records?name=#{DOMAIN}&per_page=50&page=1")
+      .to_return(status: 200, body: JSON.generate("result" => records))
+  end
+
 
   def assert_not_requested(method, url)
     refute WebMock::RequestRegistry.instance.times_executed(

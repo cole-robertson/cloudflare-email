@@ -1,0 +1,170 @@
+{
+  "date": "2026-09-10",
+  "runtime_gem_commit": "cb9b87a152771270f1bdd36d525772b954829998",
+  "final_gem_commit": "be879439353752d2127dd6413bf915f7321e3fa6",
+  "drafts": [
+    {
+      "inbound_id": 1,
+      "mailbox": "envelope-bcc-20260911@test.rebulk.com",
+      "visible_to": [
+        "envelope-inbox-20260911@test.rebulk.com"
+      ],
+      "message_id": "lzY8hvrnTqU7pQmsXzedEeeoG4tDdozFmoeF@test.rebulk.com",
+      "conversation_id": 1,
+      "draft_id": 2,
+      "draft_body": "Thank you for the update. I acknowledge receipt of the blue sample box.",
+      "needs_review": false,
+      "reasons": [],
+      "delivery_disabled": true
+    },
+    {
+      "inbound_id": 2,
+      "mailbox": "envelope-inbox-20260911@test.rebulk.com",
+      "visible_to": [
+        "envelope-inbox-20260911@test.rebulk.com"
+      ],
+      "message_id": "2jpHxhTOhJjQjvMJGSr9QxS0ninGEc8spASk@test.rebulk.com",
+      "conversation_id": 2,
+      "draft_id": 4,
+      "draft_body": "Thank you for the update. I confirm that the blue sample box has arrived safely. No further action is needed from my side.",
+      "needs_review": false,
+      "reasons": [],
+      "delivery_disabled": true
+    },
+    {
+      "inbound_id": 3,
+      "mailbox": "envelope-bcc-20260911@test.rebulk.com",
+      "visible_to": [
+        "envelope-inbox-20260911@test.rebulk.com"
+      ],
+      "message_id": "2jpHxhTOhJjQjvMJGSr9QxS0ninGEc8spASk@test.rebulk.com",
+      "conversation_id": 3,
+      "draft_id": 6,
+      "draft_body": "Thank you for the update. I acknowledge receipt of the blue sample box.",
+      "needs_review": false,
+      "reasons": [],
+      "delivery_disabled": true
+    },
+    {
+      "inbound_id": 4,
+      "mailbox": "envelope-cc-20260911@test.rebulk.com",
+      "visible_to": [
+        "envelope-inbox-20260911@test.rebulk.com"
+      ],
+      "message_id": "2jpHxhTOhJjQjvMJGSr9QxS0ninGEc8spASk@test.rebulk.com",
+      "conversation_id": 4,
+      "draft_id": 8,
+      "draft_body": "Thank you for the confirmation. I acknowledge receipt of the blue sample box.",
+      "needs_review": false,
+      "reasons": [],
+      "delivery_disabled": true
+    }
+  ],
+  "review_rerun": {
+    "body": "Thank you for your email regarding the $25,000 purchase. I acknowledge the request, but I need further details on the pricing, stock, and delivery availability before I can approve anything. Please provide this information at your earliest convenience.",
+    "review_required": true,
+    "reasons": [
+      "Review the financial or approval-related content before sending.",
+      "Confirm any requested or proposed commitment before sending.",
+      "The reply asks for clarification; review the missing information before sending.",
+      "The reply asks for important details before making a commitment."
+    ],
+    "sent": false
+  },
+  "send": {
+    "conversation_id": 2,
+    "draft_id": 4,
+    "from": "envelope-inbox-20260911@test.rebulk.com",
+    "to": "envelope-sender-20260911@test.rebulk.com",
+    "submitted_headers": {
+      "message_id": "msg.AU1ldHsiYyI6ImJhMmU1YzcxLWFlM2YtNGEzMy05Zjk1LWVmZDQwZjc1Y2Q1ZSJ9.b34c91b7018625b120adc82e282b266d28c74d0fbb84138f925be63aa17e1663@test.rebulk.com",
+      "in_reply_to": "2jpHxhTOhJjQjvMJGSr9QxS0ninGEc8spASk@test.rebulk.com",
+      "references": "2jpHxhTOhJjQjvMJGSr9QxS0ninGEc8spASk@test.rebulk.com"
+    },
+    "provider_message_id": "wt6re4McK5jssNHY0KoMEpseaMNOxpxGEpFX@test.rebulk.com",
+    "sent_at": "2026-09-10 21:17:42 UTC"
+  },
+  "events": [
+    {
+      "event_id": "01a08d2c-ea23-7912-a25c-752ab08a7c4e",
+      "status": "delivered",
+      "matched": false
+    },
+    {
+      "event_id": "01a08d2c-ea23-7912-a25c-753dd1a48d56",
+      "status": "delivered",
+      "matched": false
+    },
+    {
+      "event_id": "01a08d2c-ea23-7912-a25c-7547de980aad",
+      "status": "delivered",
+      "matched": false
+    },
+    {
+      "event_id": "01a08d2f-03a7-7e53-a4f6-55a6a7acf0df",
+      "status": "delivered",
+      "matched": true
+    },
+    {
+      "acked": 4,
+      "durable_receipts": 4,
+      "states": [
+        {
+          "id": 1,
+          "state": "accepted",
+          "message_state": "delivered",
+          "recipients": [
+            [
+              "envelope-sender-20260911@test.rebulk.com",
+              "delivered"
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "redelivery_after_durable_commit": true,
+  "cleanup": {
+    "deleted": [
+      {
+        "resource": "/accounts/0f65c87e304772dcfce95b2a5cd58343/event_subscriptions/subscriptions/a79eeae49f63409da6e4292986f8095b",
+        "success": true,
+        "status": 200
+      },
+      {
+        "resource": "/zones/fb673e4d06f921343892b504712aafcc/email/routing/rules/a5ba960b18e14a02b198008af97482a9",
+        "success": true,
+        "status": 200
+      },
+      {
+        "resource": "/zones/fb673e4d06f921343892b504712aafcc/email/routing/rules/88a67e9826574c3885dafcccddbca9fb",
+        "success": true,
+        "status": 200
+      },
+      {
+        "resource": "/zones/fb673e4d06f921343892b504712aafcc/email/routing/rules/f82de8f39b9b4dfdadf75adc3fcc6bf8",
+        "success": true,
+        "status": 200
+      },
+      {
+        "resource": "/zones/fb673e4d06f921343892b504712aafcc/email/routing/rules/8b52a4d28bb848e99d02a32b8fdf17c8",
+        "success": true,
+        "status": 200
+      },
+      {
+        "resource": "/accounts/0f65c87e304772dcfce95b2a5cd58343/workers/scripts/cf-email-envelope-20260911",
+        "success": true,
+        "status": 200
+      },
+      {
+        "resource": "/accounts/0f65c87e304772dcfce95b2a5cd58343/queues/4555cf63de2b452ea661430ed338f037",
+        "success": true,
+        "status": 200
+      }
+    ],
+    "rules_unchanged": true,
+    "catchall_unchanged": true
+  },
+  "browser": "Shared preview status/open timed out; no visual pass claimed",
+  "first_send_harness_errors": 2
+}

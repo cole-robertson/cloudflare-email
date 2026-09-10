@@ -1,0 +1,9 @@
+{
+  "timestamp_ms": 1789084800000,
+  "body": "{\"type\":\"cf.email.sending.message.delivered\",\"source\":{\"zoneId\":\"test-zone\",\"domain\":\"send.example.com\",\"type\":\"email.sending\"},\"metadata\":{\"accountId\":\"test-account-123\",\"eventSubscriptionId\":\"test-subscription\",\"eventSchemaVersion\":1,\"eventTimestamp\":\"2026-09-11T00:00:00Z\"},\"payload\":{\"eventId\":\"event-123\",\"messageId\":\"message-456\",\"sender\":\"sender@send.example.com\",\"recipient\":\"recipient@example.net\",\"subject\":\"Synthetic delivery test\",\"terminal\":true,\"delivery\":{\"status\":\"delivered\",\"provider\":\"test-provider\",\"deliveryTimeMs\":100}}}",
+  "attempts": 1,
+  "metadata": {
+    "CF-sourceMessageSource": "email.sending",
+    "CF-Content-Type": "json"
+  }
+}
