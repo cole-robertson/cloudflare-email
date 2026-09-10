@@ -50,6 +50,10 @@ FileUtils.cp(File.join(GEM_ROOT, "lib/generators/cloudflare/email/templates/init
 class IntegrationApp < Rails::Application
   config.root = APP_ROOT
   config.eager_load = true
+  # Generated files appear after boot in the fresh-install scenario. Keep the
+  # test app's classes stable instead of reloading them on its first request,
+  # which would discard the RoutingJob observation installed by the v2 test.
+  config.enable_reloading = false
   config.secret_key_base = "a" * 64
   config.hosts.clear
   config.action_dispatch.show_exceptions = :none
