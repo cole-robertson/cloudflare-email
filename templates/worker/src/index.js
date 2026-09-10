@@ -51,6 +51,8 @@ export default {
     const signature = await sign(env.INGRESS_SECRET, signedPayload);
 
     let res;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15_000);
     try {
       res = await fetch(env.RAILS_INGRESS_URL, {
         method: "POST",
@@ -60,10 +62,14 @@ export default {
           "X-CF-Email-Signature": signature,
         },
         body: raw,
+        signal: controller.signal,
+        redirect: "error",
       });
     } catch (err) {
-      message.setReject(`upstream fetch failed: ${err.message}`);
+      message.setReject(controller.signal.aborted ? "upstream fetch timed out" : "upstream fetch failed");
       return;
+    } finally {
+      clearTimeout(timeout);
     }
 
     if (!res.ok) {

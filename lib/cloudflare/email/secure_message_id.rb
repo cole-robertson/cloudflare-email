@@ -3,13 +3,15 @@ require "cloudflare/email/signing"
 
 module Cloudflare
   module Email
-    # Signed outbound Message-IDs for reply authentication.
+    # Signed outbound Message-IDs for thread correlation, not sender identity.
     #
     # Sign the outbound Message-ID with HMAC-SHA256. The recipient's reply
     # naturally carries the signed id in `In-Reply-To:`, which your mailbox
     # verifies and decodes to recover the original thread state.
     #
-    # See README's "Signed replies" section for a full usage example.
+    # Requires a transport that preserves custom Message-IDs. Cloudflare's
+    # header documentation describes Message-ID as platform-controlled;
+    # verify send_raw preservation in your environment before using this.
     module SecureMessageId
       InvalidToken = Class.new(Cloudflare::Email::Error)
 
@@ -31,12 +33,15 @@ module Cloudflare
           b64    = Signing.base64url_encode(packed)
           mac    = Signing.hmac_hex(secret, b64)
 
-          "#{prefix}.#{b64}.#{mac}@#{domain}"
+          id = "#{prefix}.#{b64}.#{mac}@#{domain}"
+          raise ArgumentError, "signed Message-ID exceeds 900 bytes; use a compact reference" if id.bytesize > 900
+          id
         end
 
         # Decode a Message-ID produced by encode. Accepts `<bracketed>` form
         # too. Returns parsed payload or raises InvalidToken.
         def decode(message_id, secret:, max_age: DEFAULT_MAX_AGE, now: Time.now.to_i)
+          raise InvalidToken, "secret must not be empty" if secret.to_s.empty?
           raise InvalidToken, "message-id is empty" if message_id.to_s.empty?
 
           id = strip_brackets(message_id.to_s).strip

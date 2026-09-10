@@ -4,6 +4,12 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "23 8 * * 1"
+
+permissions:
+  contents: read
 
 jobs:
   ruby:
@@ -19,10 +25,13 @@ jobs:
             rails: "8_0"
           - ruby: "3.2"
             rails: "8_1"
+        include:
+          - ruby: "4.0"
+            rails: "8_1"
     env:
       BUNDLE_GEMFILE: "${{ github.workspace }}/gemfiles/rails_${{ matrix.rails }}.gemfile"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: "${{ matrix.ruby }}"
@@ -36,9 +45,13 @@ jobs:
       run:
         working-directory: templates/worker
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: "20"
-      - run: npm install --legacy-peer-deps
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: templates/worker/package-lock.json
+      - run: npm ci
+      - run: npm audit --audit-level=high
       - run: npm test
+      - run: npm run check

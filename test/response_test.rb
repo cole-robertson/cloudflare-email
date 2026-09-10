@@ -33,6 +33,7 @@ class ResponseTest < Minitest::Test
     assert_equal [], r.delivered
     assert_equal [], r.queued
     assert_equal [], r.permanent_bounces
+    assert_equal [], r.suppressed_recipients
   end
 
   def test_status_falls_back_to_success

@@ -18,7 +18,7 @@ class ClientResilienceTest < Minitest::Test
     payload = events.first.payload
     assert_equal ACCOUNT_ID, payload[:account_id]
     assert_equal 200, payload[:status]
-    assert_nil payload[:message_id]  # Cloudflare API does not return message_id
+    assert_nil payload[:message_id]  # This compatibility fixture omits message_id
     assert payload[:path].include?("/email/sending/send")
   ensure
     ActiveSupport::Notifications.unsubscribe(subscriber)

@@ -5,5 +5,7 @@ require "cloudflare/email/signing"
 require "cloudflare/email/credentials"
 require "cloudflare/email/client"
 require "cloudflare/email/secure_message_id"
+require "cloudflare/email/delivery_event"
+require "cloudflare/email/event_consumer"
 
 require "cloudflare/email/engine" if defined?(::Rails::Engine)

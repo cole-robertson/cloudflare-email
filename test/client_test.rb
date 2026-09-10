@@ -41,7 +41,7 @@ class ClientTest < Minitest::Test
 
     assert_kind_of Cloudflare::Email::Response, response
     assert response.success?
-    assert_nil response.message_id  # Cloudflare API does not return message_id
+    assert_nil response.message_id  # This compatibility fixture omits message_id
     assert_equal ["user@example.com"], response.delivered
     assert_requested(stub)
   end
@@ -124,14 +124,15 @@ class ClientTest < Minitest::Test
   end
 
   def test_5xx_retries_then_fails_when_exhausted
-    stub_request(:post, send_endpoint)
+    request = stub_request(:post, send_endpoint)
       .to_return(status: 503, body: JSON.generate(cloudflare_error_body("upstream down")))
 
     assert_raises(Cloudflare::Email::ServerError) do
-      make_client(retries: 1).send(
+      make_client(retries: 1, retry_ambiguous: true).send(
         from: "a@b.com", to: "c@d.com", subject: "x", text: "y",
       )
     end
+    assert_requested request, times: 2
   end
 
   def test_network_error_retries
@@ -139,7 +140,7 @@ class ClientTest < Minitest::Test
       .to_raise(Errno::ECONNRESET)
       .then.to_return(status: 200, body: JSON.generate(cloudflare_success_body))
 
-    response = make_client(retries: 1).send(
+    response = make_client(retries: 1, retry_ambiguous: true).send(
       from: "a@b.com", to: "c@d.com", subject: "x", text: "y",
     )
     assert response.success?

@@ -154,7 +154,7 @@ class ClientAdvancedTest < Minitest::Test
 
     client = Cloudflare::Email::Client.new(
       account_id: ACCOUNT_ID, api_token: API_TOKEN,
-      retries: 1, initial_backoff: 0.0, logger: logger,
+      retries: 1, initial_backoff: 0.0, logger: logger, retry_ambiguous: true,
     )
     client.send(from: "a@b.com", to: "c@d.com", subject: "x", text: "y")
     logger.verify

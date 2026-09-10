@@ -1,6 +1,31 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 — Unreleased
+
+- Add outbound delivery events through Cloudflare Queues HTTP pull, typed event
+  data, account/domain checks, per-message acknowledgement after handler success,
+  and a Rails `consume_events` task. Applications provide durable idempotency.
+- Expose suppressed recipients and provider message IDs in responses/notifications;
+  support cc/bcc-only structured sends and HTTP-date Retry-After headers.
+- Default to retrying only rate limits and pre-send connection failures. Ambiguous
+  network/5xx retries now require `retry_ambiguous: true` to accept duplication risk.
+- Fix generated ENV credentials, send-only eager boot, duplicate ingress responses,
+  accidental generator deployment tasks, and development environment isolation.
+- Require subdomain routing DNS preflight; refuse misleading subdomain catch-all
+  scope; use current apex DNS API and paginated rule lookup; surface setup failures.
+- Update locked Worker tooling, require explicit Wrangler environments, bound
+  forwarding requests to 15 seconds, and reject redirects. Add scheduled CI,
+  dependency checks, actual Rails integration tests, and Ruby 4 / Rails 8.1 coverage.
+- Require FROM for test sends; remove undocumented sending-domain discovery and
+  misleading diagnostic claims. Update DNS, SMTP, retry, and signed-ID guidance.
+- Bound legacy signed Message-ID output to 900 bytes; reject empty decode secrets.
+  Its current Cloudflare header preservation is unverified, and it is correlation,
+  not sender authentication. See docs/upgrading-0.2.md for migration details.
+
+## 0.1.0 — 2026-04-18
+
+The notes below describe the original April implementation and its historical
+verification. Current compatibility and security guidance is in the 0.2.0 docs.
 
 - **`Cloudflare::Email::SecureMessageId`** — sign the outbound `Message-ID:`
   with HMAC-SHA256. The recipient's reply naturally carries the signed id

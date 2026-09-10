@@ -19,7 +19,7 @@ module Cloudflare
     #   deployer.put_secret("RAILS_INGRESS_URL", "https://...")
     class WorkerDeployer
       SCRIPT_NAME_PREFIX         = "cloudflare-email-ingress".freeze
-      DEFAULT_COMPATIBILITY_DATE = "2026-04-01".freeze
+      DEFAULT_COMPATIBILITY_DATE = "2026-09-10".freeze
       API_BASE                   = "https://api.cloudflare.com/client/v4".freeze
 
       attr_reader :script_name
@@ -160,7 +160,7 @@ module Cloudflare
         status = response.code.to_i
         body   = parse(response.body)
 
-        return body if status.between?(200, 299)
+        return body if status.between?(200, 299) && body.is_a?(Hash) && body["success"] == true
 
         errors  = body.is_a?(Hash) ? Array(body["errors"]) : []
         message = errors.map { |e| e.is_a?(Hash) ? e["message"] : e.to_s }.compact.join("; ")

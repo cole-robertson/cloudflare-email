@@ -27,7 +27,8 @@ module Cloudflare
         provisioner = Cloudflare::Email::RoutingProvisioner.new(api_token: management_token)
         provisioner.provision(address: opts[:address], worker_name: worker)
 
-        say "  ✓ Route created/updated — mail to #{opts[:address]} will hit Worker #{worker}."
+        say "  ✓ Route created/updated for #{opts[:address]} → Worker #{worker}."
+        say "  Verify DNS propagation and send a test message to confirm delivery."
       end
     end
   end

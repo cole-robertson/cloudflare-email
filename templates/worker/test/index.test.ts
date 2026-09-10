@@ -51,11 +51,13 @@ describe("cloudflare-email Worker", () => {
 
   beforeEach(() => {
     fetchSpy = vi.fn(async () => new Response("", { status: 200 }));
-    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+    vi.stubGlobal("fetch", fetchSpy);
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
   it("POSTs raw MIME with HMAC signature and timestamp", async () => {
@@ -120,7 +122,31 @@ describe("cloudflare-email Worker", () => {
 
     await worker.email(message as any, env);
 
-    expect(rejects[0]).toMatch(/upstream fetch failed: DNS fail/);
+    expect(rejects).toEqual(["upstream fetch failed"]);
+  });
+
+  it("aborts a stalled ingress request after 15 seconds", async () => {
+    vi.useFakeTimers();
+    fetchSpy.mockImplementationOnce((_url, options) => new Promise((_resolve, reject) => {
+      options.signal.addEventListener("abort", () => reject(new Error("aborted")));
+    }));
+    const { message, rejects } = makeMessage(RAW);
+    const delivery = worker.email(message as any, { RAILS_INGRESS_URL: URL_, INGRESS_SECRET: SECRET });
+    // Signing uses async Web Crypto, so wait until fetch starts before advancing timers.
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledOnce());
+    await vi.advanceTimersByTimeAsync(15_000);
+    await delivery;
+    expect(fetchSpy.mock.calls[0][1].signal.aborted).toBe(true);
+    expect(rejects).toEqual(["upstream fetch timed out"]);
+  });
+
+  it("refuses redirects and clears the timeout after delivery", async () => {
+    vi.useFakeTimers();
+    await worker.email(makeMessage(RAW).message as any, { RAILS_INGRESS_URL: URL_, INGRESS_SECRET: SECRET });
+    const options = fetchSpy.mock.calls[0][1];
+    expect(options.redirect).toBe("error");
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(options.signal.aborted).toBe(false);
   });
 
   it("signature covers tampered bodies differently", async () => {

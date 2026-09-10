@@ -1,4 +1,5 @@
 require "cloudflare/email/worker_deployer"
+require "tempfile"
 
 module Cloudflare
   module Email
@@ -51,6 +52,14 @@ module Cloudflare
       private
 
       def check_prerequisites
+        unless defined?(Rails) && Rails.respond_to?(:env) && Rails.env.development?
+          raise "cloudflare:email:dev only runs in development; use RAILS_ENV=development"
+        end
+        unless Rails.application.config.respond_to?(:action_mailbox) &&
+               Rails.application.config.action_mailbox.ingress == :cloudflare
+          raise "Set config.action_mailbox.ingress = :cloudflare in config/environments/development.rb"
+        end
+
         unless system("command -v cloudflared >/dev/null 2>&1")
           raise "cloudflared not found in PATH — install from https://developers.cloudflare.com/cloudflared/"
         end
@@ -64,9 +73,10 @@ module Cloudflare
 
       def start_tunnel
         @io.puts "  Starting cloudflared tunnel on :#{@port}..."
-        @tunnel_log = File.open("/tmp/cloudflare-email-dev-tunnel.log", "w")
+        @tunnel_log = Tempfile.new(["cloudflare-email-dev-tunnel", ".log"])
         @tunnel_pid = spawn(
           "cloudflared", "tunnel", "--url", "http://127.0.0.1:#{@port}",
+          "--http-host-header", "localhost",
           out: @tunnel_log, err: @tunnel_log,
         )
       end
@@ -75,7 +85,7 @@ module Cloudflare
         deadline = Time.now + 30
         while Time.now < deadline
           sleep 0.5
-          log = File.read("/tmp/cloudflare-email-dev-tunnel.log") rescue ""
+          log = File.read(@tunnel_log.path) rescue ""
           if (match = log.match(%r{https://[a-z0-9\-]+\.trycloudflare\.com}))
             return match[0]
           end
@@ -89,7 +99,7 @@ module Cloudflare
           Process.wait(@tunnel_pid) rescue nil
           @tunnel_pid = nil
         end
-        @tunnel_log&.close
+        @tunnel_log&.close!
       end
 
     end

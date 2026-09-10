@@ -1,3 +1,4 @@
+require "rails/generators"
 require "rails/generators/base"
 require "securerandom"
 
@@ -16,7 +17,7 @@ module Cloudflare
                      desc: "Directory to copy the Cloudflare Worker template into"
 
         class_option :all_envs, type: :boolean, default: false,
-                     desc: "Also configure action_mailbox.ingress in development.rb and test.rb (not just production.rb)"
+                     desc: "Also configure action_mailbox.ingress in test.rb (development and production are configured by default)"
 
         class_option :deploy_worker, type: :boolean, default: nil,
                      desc: "Deploy the Worker via wrangler after setup (nil = interactive prompt)"
@@ -74,8 +75,8 @@ module Cloudflare
         def configure_action_mailbox_ingress
           return unless options[:inbound]
 
-          envs = ["production"]
-          envs += ["development", "test"] if options[:all_envs]
+          envs = ["development", "production"]
+          envs << "test" if options[:all_envs]
 
           envs.each do |env|
             file = "config/environments/#{env}.rb"
@@ -92,7 +93,7 @@ module Cloudflare
           return unless options[:inbound]
 
           worker_src = File.expand_path("../../../../templates/worker", __dir__)
-          directory worker_src, options[:worker_dir]
+          directory worker_src, options[:worker_dir], exclude_pattern: %r{/(node_modules|\.wrangler|\.dev\.vars(?:\.[^/]*)?|\.env(?:\.[^/]*)?)(/|$)}
         end
 
         def maybe_deploy_worker
@@ -103,35 +104,39 @@ module Cloudflare
             say ""
             say "  The Worker can be deployed via the Cloudflare API (pure Ruby, no wrangler/Node)"
             say "  once you've set cloudflare.account_id and cloudflare.api_token in Rails credentials."
-            say "  Run `bin/rails cloudflare:email:deploy_worker URL=https://yourapp.com#{ingress_path}`"
+            say "  Run `RAILS_ENV=production bin/rails cloudflare:email:deploy_worker SCRIPT=#{worker_script_argument} URL=https://yourapp.com#{ingress_path}`"
             say "  after `bin/rails credentials:edit`."
             say ""
             say "  Alternatively, deploy now via wrangler if it's installed locally." if wrangler_installed?
           end
 
-          if should_deploy && wrangler_installed?
+          if should_deploy
+            raise Thor::Error, "Install wrangler or use the cloudflare:email:deploy_worker Rails task" unless wrangler_installed?
             wrangler_deploy
           end
         end
 
-        def wrangler_deploy
-          @ingress_secret = SecureRandom.hex(32)
+        no_tasks do
+          def wrangler_deploy
+            @ingress_secret = SecureRandom.hex(32)
 
-          inside options[:worker_dir] do
-            run "npm install --legacy-peer-deps", abort_on_failure: true
+            inside options[:worker_dir] do
+              run "npm ci", abort_on_failure: true
 
-            ingress_url = ask("Rails ingress URL? (e.g. https://yourapp.com#{ingress_path})")
-            if ingress_url.to_s.strip.empty?
-              say "  Skipping Worker deploy — no URL supplied. Re-run `wrangler deploy` manually when ready.", :yellow
-              return
+              ingress_url = ask("Rails ingress URL? (e.g. https://yourapp.com#{ingress_path})")
+              if ingress_url.to_s.strip.empty?
+                say "  Skipping Worker deploy — no URL supplied. Re-run `npm run deploy -- --env production` manually when ready.", :yellow
+                return
+              end
+
+              run "npm run deploy -- --env production", abort_on_failure: true
+              run_with_stdin("npx --no-install wrangler secret put RAILS_INGRESS_URL --env production", ingress_url.strip)
+              run_with_stdin("npx --no-install wrangler secret put INGRESS_SECRET --env production", @ingress_secret)
             end
 
-            run_with_stdin("wrangler secret put RAILS_INGRESS_URL", ingress_url.strip)
-            run_with_stdin("wrangler secret put INGRESS_SECRET",    @ingress_secret)
-            run "wrangler deploy", abort_on_failure: false
+            @worker_deployed = true
           end
-
-          @worker_deployed = true
+          private :wrangler_deploy
         end
 
         def print_post_install
@@ -155,41 +160,43 @@ module Cloudflare
           say "       bin/rails cloudflare:email:doctor"
           say ""
           say "  3. Send a test email:"
-          say "       TO=you@example.com bin/rails cloudflare:email:send_test"
+          say "       FROM=hello@your-verified-domain.com TO=you@example.com bin/rails cloudflare:email:send_test"
           say ""
 
           if options[:inbound] && !@worker_deployed
             say "  4. Deploy the Worker (pick one):"
             say "       # Pure Ruby (recommended — no wrangler/Node required):"
-            say "       bin/rails cloudflare:email:deploy_worker URL=https://yourapp.com#{ingress_path}"
+            say "       RAILS_ENV=production bin/rails cloudflare:email:deploy_worker SCRIPT=#{worker_script_argument} URL=https://yourapp.com#{ingress_path}"
             say ""
             say "       # Or via wrangler if you have it installed:"
             say "       cd #{options[:worker_dir]}"
-            say "       npm install --legacy-peer-deps"
-            say "       wrangler secret put INGRESS_SECRET     # paste #{@ingress_secret[0, 8]}..."
-            say "       wrangler secret put RAILS_INGRESS_URL  # https://yourapp.com#{ingress_path}"
-            say "       wrangler deploy"
+            say "       npm ci"
+            say "       npm run deploy -- --env production"
+            say "       npx --no-install wrangler secret put INGRESS_SECRET --env production # paste #{@ingress_secret[0, 8]}..."
+            say "       npx --no-install wrangler secret put RAILS_INGRESS_URL --env production # https://yourapp.com#{ingress_path}"
             say ""
           end
 
           if options[:inbound]
             say "  5. For local dev (tunnels cloudflared to your Worker):"
-            say "       bin/rails cloudflare:email:dev"
+            say "       RAILS_ENV=development bin/rails cloudflare:email:deploy_worker SCRIPT=#{worker_script_argument}"
+            say "       RAILS_ENV=development bin/rails cloudflare:email:dev"
+            say "     Route a separate test address to cloudflare-email-ingress-development."
             say ""
             say "  6. In the Cloudflare dashboard:"
             say "       Email Routing -> Routes -> Send to a Worker -> #{worker_name}"
             say ""
             say "  Dashboard deep-links:"
             say "    API tokens:       https://dash.cloudflare.com/profile/api-tokens"
-            say "    Sending domains:  https://dash.cloudflare.com/?to=/:account/email/sending"
-            say "    Email routing:    https://dash.cloudflare.com/?to=/:account/email/routing"
+            say "    Sending domains:  https://dash.cloudflare.com/?to=/:account/email-service/sending"
+            say "    Email routing:    https://dash.cloudflare.com/?to=/:account/email-service/routing"
             say ""
             say "  Rotation: to rotate the ingress secret, update cloudflare.ingress_secret"
-            say "  in Rails credentials AND re-run `wrangler secret put INGRESS_SECRET` in"
+            say "  in Rails credentials AND re-run `wrangler secret put INGRESS_SECRET --env production` in"
             say "  #{options[:worker_dir]}/ with the new value, then redeploy the Worker."
             say ""
-            say "  Dev/test: by default only production.rb is wired to :cloudflare ingress."
-            say "  Re-run with --all-envs to also configure development.rb and test.rb."
+            say "  Development and production are wired to :cloudflare ingress."
+            say "  Re-run with --all-envs to also configure test.rb."
           end
           say ""
         end
@@ -211,14 +218,19 @@ module Cloudflare
         end
 
         def worker_name
-          "cloudflare-email-ingress"
+          "cloudflare-email-ingress-production"
+        end
+
+        def worker_script_argument
+          require "shellwords"
+          Shellwords.escape(File.join(options[:worker_dir], "src/index.js"))
         end
 
         def run_with_stdin(cmd, input)
           require "open3"
           out, err, status = Open3.capture3(cmd, stdin_data: input + "\n")
           unless status.success?
-            say "  #{cmd} failed: #{err.empty? ? out : err}", :red
+            raise Thor::Error, "#{cmd} failed: #{err.empty? ? out : err}"
           end
         end
       end

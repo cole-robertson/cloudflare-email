@@ -34,8 +34,8 @@ module Cloudflare
             head :unauthorized
           when :ok
             inbound = ActionMailbox::InboundEmail.create_and_extract_message_id!(raw_body)
-            payload[:result]     = :ok
-            payload[:message_id] = inbound.message_id
+            payload[:result]     = inbound ? :ok : :duplicate
+            payload[:message_id] = inbound&.message_id
             head :ok
           end
         end

@@ -64,7 +64,7 @@ module Cloudflare
         if api_token.to_s.empty?
           record("credentials.cloudflare.api_token", FAIL, "missing — run bin/rails credentials:edit")
         else
-          record("credentials.cloudflare.api_token", OK, "#{api_token[0, 8]}...")
+          record("credentials.cloudflare.api_token", OK, "set (redacted)")
         end
       end
 
@@ -89,47 +89,20 @@ module Cloudflare
         if response[:ok]
           record("Account accessible", OK, response[:body].dig("result", "name") || account_id)
         elsif response[:status] == 403
-          # Narrowly-scoped send-only tokens don't have account read permission;
-          # that's a feature, not a bug. We already confirmed the token is valid.
-          record("Account accessible", OK, "send-scoped token (no account read — this is fine)")
+          # Send-scoped tokens may lack account read permission. A 403 cannot
+          # establish that this token can send for the configured account.
+          record("Account accessible", SKIP, "403 — account access unverified; token may lack account read permission")
         else
           record("Account accessible", FAIL, extract_error(response))
         end
       end
 
       def check_sending_domains
-        token      = credential(:api_token)
-        account_id = credential(:account_id)
-        return record("Sending domains", SKIP, "missing credentials") if token.to_s.empty? || account_id.to_s.empty?
-
-        response = request("GET", "/accounts/#{account_id}/email/sending/domains", token: token)
-        if response[:status] == 403 || response[:status] == 404
-          record("Sending domains", SKIP, "send-scoped token can't list domains (check the dashboard instead)")
-          return
-        end
-
-        unless response[:ok]
-          record("Sending domains", WARN, "could not list: #{extract_error(response)}")
-          return
-        end
-
-        domains = Array(response[:body]["result"])
-        if domains.empty?
-          record("Sending domains", WARN, "no sending domains set up — add one in the dashboard")
-          return
-        end
-
-        verified = domains.select { |d| d["verified"] == true || d["status"] == "verified" }
-        if verified.any?
-          names = verified.map { |d| d["name"] || d["domain"] }.compact.join(", ")
-          record("Sending domains", OK, "#{verified.size} verified (#{names})")
-        else
-          names = domains.map { |d| d["name"] || d["domain"] }.compact.join(", ")
-          record("Sending domains", WARN, "#{domains.size} configured but none verified (#{names})")
-        end
+        record("Sending domains", SKIP, "verify your sender domain in Email Sending in the Cloudflare dashboard")
       end
 
       def check_ingress_secret
+        return record("Ingress secret", SKIP, "Cloudflare inbound routing not selected") unless inbound_enabled?
         require "cloudflare/email/credentials"
         secret = Cloudflare::Email::Credentials.ingress_secret
 
@@ -143,6 +116,7 @@ module Cloudflare
       end
 
       def check_token_split
+        return record("Token split", SKIP, "send-only setup; management token optional") unless inbound_enabled?
         require "cloudflare/email/credentials"
         if Cloudflare::Email::Credentials.split_tokens?
           record("Token split", OK, "separate management_token set (good security posture)")
@@ -160,10 +134,14 @@ module Cloudflare
         when :cloudflare
           record("ActionMailbox ingress", OK, ":cloudflare")
         when nil
-          record("ActionMailbox ingress", WARN, "nil — inbound will 404. Set config.action_mailbox.ingress = :cloudflare")
+          record("ActionMailbox ingress", SKIP, "inbound routing not configured")
         else
-          record("ActionMailbox ingress", WARN, "#{ActionMailbox.ingress.inspect} — not :cloudflare, our controller will 404")
+          record("ActionMailbox ingress", SKIP, "#{ActionMailbox.ingress.inspect} — Cloudflare inbound routing not selected")
         end
+      end
+
+      def inbound_enabled?
+        defined?(ActionMailbox) && ActionMailbox.respond_to?(:ingress) && ActionMailbox.ingress == :cloudflare
       end
 
       def check_delivery_method_registered
@@ -188,9 +166,9 @@ module Cloudflare
         warn_count = @results.count { |r| r[:status] == WARN }
 
         if fail_count.zero? && warn_count.zero?
-          @io.puts "  Everything looks good."
+          @io.puts "  Completed checks passed. Review skipped checks; live delivery is not verified."
         elsif fail_count.zero?
-          @io.puts "  #{warn_count} warning(s). Setup is usable but incomplete."
+          @io.puts "  #{warn_count} warning(s). Review warnings and skipped checks before relying on delivery."
         else
           @io.puts "  #{fail_count} failure(s), #{warn_count} warning(s). Fix failures before sending."
         end
@@ -228,7 +206,7 @@ module Cloudflare
 
         response = http.request(req)
         body = JSON.parse(response.body) rescue {}
-        { ok: response.code.to_i.between?(200, 299), status: response.code.to_i, body: body }
+        { ok: response.code.to_i.between?(200, 299) && body.is_a?(Hash) && body["success"] != false, status: response.code.to_i, body: body }
       rescue StandardError => e
         { ok: false, status: 0, body: { "errors" => [{ "message" => e.message }] } }
       end
