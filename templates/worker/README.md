@@ -56,8 +56,8 @@ timestamps outside its 5-minute acceptance window. A signature authenticates the
 Worker request, not the original email sender. Captured requests remain valid
 inside that window; Rails deduplicates messages through Action Mailbox.
 
-Upgrade the Rails gem before deploying this Worker. Rails accepts legacy v1
-signatures without trusting any envelope header. With v2 it stores authenticated
+Deploy the Rails gem and this Worker together with ingress paused during the
+transition. Rails requires v2 signatures and rejects v1/missing versions. It stores authenticated
 SMTP metadata separately from MIME; applications read it using
 `Cloudflare::Email::Envelope.for(inbound_email)`. Duplicate detection includes the
 exact SMTP recipient, preserving separate To/Cc/Bcc deliveries. The format accepts

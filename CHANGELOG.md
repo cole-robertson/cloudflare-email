@@ -5,8 +5,14 @@
 - Authenticate SMTP envelope sender/recipient with the Worker's v2 HMAC format,
   persist trusted metadata before routing, and expose `Envelope.for(inbound_email)`.
   Preserve raw MIME and scope duplicate detection to the exact SMTP recipient.
-  Legacy ingress remains supported without trusted envelope metadata. Upgrade
-  Rails before deploying the updated Worker; see docs/upgrading-0.2.md.
+  Require v2 ingress; remove v1 compatibility and the unused signed Message-ID
+  helper. Coordinate Rails and Worker deployment; see docs/upgrading-0.2.md.
+
+- Extract shared provider acceptance, delivery-event ordering, and Message-ID
+  normalization primitives from the inbox application.
+- Add an opt-in ActiveRecord event inbox and `cloudflare:email:tracking` generator:
+  committed receipts before ACK, account/event uniqueness, payload-conflict
+  detection, unmatched replay, and transactional handlers with explicit outcomes.
 
 - Verify actual local workerd-to-Rails delivery in CI. This exposed and fixed an
   unsupported fetch redirect mode; use `manual` and reject the 3xx response.
@@ -14,7 +20,8 @@
 
 - Add outbound delivery events through Cloudflare Queues HTTP pull, typed event
   data, account/domain checks, per-message acknowledgement after handler success,
-  and a Rails `consume_events` task. Applications provide durable idempotency.
+  and a Rails `consume_events` task. Optional Rails receipts provide durable
+  deduplication; applications supply correlation and processing policy.
 - Expose suppressed recipients and provider message IDs in responses/notifications;
   support cc/bcc-only structured sends and HTTP-date Retry-After headers.
 - Default to retrying only rate limits and pre-send connection failures. Ambiguous

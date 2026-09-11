@@ -10,7 +10,7 @@ module Cloudflare
     #   X-CF-Email-Signature: <hex digest>
     #   X-CF-Email-Signature-Version: 2
     #   X-CF-Email-Envelope: <unpadded base64url JSON from/to>
-    # Legacy signatures remain accepted but carry no trusted envelope.
+    # Requests must include the v2 signature and authenticated SMTP envelope.
     #
     # Set the shared secret in Rails credentials under cloudflare.ingress_secret
     # (or in the CLOUDFLARE_INGRESS_SECRET env var) and as the Worker secret
@@ -49,10 +49,7 @@ module Cloudflare
       private
 
       def persist_inbound
-        envelope = if request.headers["X-CF-Email-Signature-Version"] == "2"
-          Cloudflare::Email::Envelope.decode(request.headers["X-CF-Email-Envelope"])
-        end
-        return ActionMailbox::InboundEmail.create_and_extract_message_id!(raw_body) unless envelope
+        envelope = Cloudflare::Email::Envelope.decode(request.headers["X-CF-Email-Envelope"])
 
         # Commit trusted routing metadata before ActionMailbox's after_create_commit
         # enqueues routing. Identical MIME for To/Cc/Bcc recipients is independent.

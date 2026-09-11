@@ -188,7 +188,8 @@ class RailsAppTest < Minitest::Test
       Rails.env = original_env
     end
 
-    def signed_post(body, timestamp: Time.now.to_i.to_s, signature: nil, version: nil, envelope: nil)
+    def signed_post(body, timestamp: Time.now.to_i.to_s, signature: nil, version: "2",
+      envelope: Cloudflare::Email::Envelope.encode(from: "sender@example.com", to: "receiver@example.com"))
       signature ||= Cloudflare::Email::Verification.sign(secret: ENV.fetch("CLOUDFLARE_INGRESS_SECRET"), body: body,
         timestamp: timestamp, version: version, envelope: envelope)
       post "/rails/action_mailbox/cloudflare/inbound_emails", body,
@@ -237,14 +238,19 @@ class RailsAppTest < Minitest::Test
       end
     end
 
-    def test_legacy_ingress_never_trusts_envelope_headers_or_mime_headers
+    def test_legacy_ingress_is_rejected_without_persistence_or_routing
       envelope = Cloudflare::Email::Envelope.encode(from: "smtp@example.com", to: "spoofed@example.com")
       body = "From: sender@example.com\r\nTo: visible@example.com\r\nMessage-ID: <legacy-untrusted@example.com>\r\nX-CF-Email-Envelope: #{envelope}\r\n\r\nBody\r\n"
-      signed_post(body, envelope: envelope)
-      assert_equal 200, last_response.status
-      inbound = ActionMailbox::InboundEmail.find_by!(message_id: "legacy-untrusted@example.com")
-      assert_nil Cloudflare::Email::Envelope.for(inbound)
-      assert_equal body, inbound.raw_email.download
+      timestamp = Time.now.to_i.to_s
+      signature = Cloudflare::Email::Signing.hmac_hex(ENV.fetch("CLOUDFLARE_INGRESS_SECRET"), "#{timestamp}.".b + body.b)
+      before = ActionMailbox::InboundEmail.count
+      ActionMailbox::RoutingJob.stub(:perform_later, ->(*) { flunk "rejected ingress must not route" }) do
+        [nil, "1"].each do |version|
+          signed_post(body, timestamp: timestamp, signature: signature, version: version, envelope: envelope)
+          assert_equal 401, last_response.status
+        end
+      end
+      assert_equal before, ActionMailbox::InboundEmail.count
     end
 
     def test_v2_rejects_invalid_or_tampered_envelope_without_persistence

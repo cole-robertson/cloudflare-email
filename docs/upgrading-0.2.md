@@ -17,18 +17,22 @@
 
 Copy/review the updated Worker files from this gem; the generator does not silently replace your deployed Worker.
 
-Upgrade the Rails gem **before** deploying the v2 Worker. Its HMAC now covers the
-SMTP envelope as well as unchanged MIME. Rails stores that authenticated metadata
-before enqueueing routing jobs. `Cloudflare::Email::Envelope.for(inbound_email)`
-returns a string-keyed `from`/`to` hash, or `nil` for legacy requests. Legacy
-signatures remain accepted, but HTTP/MIME envelope headers are never trusted for
-those requests. Route tenant mailboxes using the trusted SMTP recipient instead
-of MIME `To`/`Cc`; decide explicitly how the application handles missing metadata.
-The dogfooding inbox defaults to strict envelope routing: during a staged upgrade,
-its `ALLOW_LEGACY_EMAIL_ROUTING=true` flag temporarily permits only legacy
-single-To/no-Cc traffic. Deploy the v2 Worker, verify envelope routing, and remove
-that flag. Pause ingress during the transition if legacy multi-recipient traffic
-must not be interrupted. See the [upgrade rehearsal](verification/2026-09-10-install-upgrade.md).
+0.2.0 is a preproduction protocol break: only the bundled v2 Worker protocol is
+accepted. Missing or v1 signature versions receive HTTP 401 before persistence
+or routing. Its HMAC covers the SMTP envelope as well as unchanged MIME.
+Pause test ingress while updating Rails and the deployed Worker together; verify
+the matching ingress URL and shared secret before resuming delivery. There is no
+legacy routing mode or supported mixed-version rollout.
+
+Rails stores authenticated metadata before enqueueing routing jobs.
+`Cloudflare::Email::Envelope.for(inbound_email)` returns a string-keyed `from`/`to`
+hash for accepted ingress. It returns `nil` for records from another ingress or
+older stored records without verified metadata; applications should refuse to
+route those using sender-supplied MIME headers. Route tenant mailboxes using the
+trusted SMTP recipient instead of MIME `To`/`Cc`.
+
+The [earlier upgrade rehearsal](verification/2026-09-10-install-upgrade.md) is a
+historical report and its temporary legacy-mode instructions no longer apply.
 Identical MIME for separate SMTP recipients is stored separately; retries for the
 same exact recipient remain duplicates. This includes Bcc deliveries without a
 visible recipient header. The envelope format supports ASCII dot-atom addresses
@@ -54,7 +58,7 @@ Responses and notifications expose `message_id` when present and `suppressed_rec
 
 Add a dedicated Queue, Email Sending event subscription, and HTTP pull consumer to use [delivery events](delivery-events.md). Existing applications are not subscribed or polled automatically. Provide an idempotent handler and configure retries/dead-letter handling.
 
-The old README's signed-reply identity and exactly-once claims were too strong. Signed Message-IDs prove payload integrity, not sender identity, and a repeated Message-ID is not a send idempotency key. Review [thread correlation](thread-correlation.md) before retaining that feature. Live testing confirmed Cloudflare replaces custom IDs: store provider IDs and include parent IDs in outgoing reply headers.
+The old README's signed-reply identity and exactly-once claims were too strong. The unused signed-ID helper has been removed. A repeated Message-ID is not a send idempotency key. Live testing confirmed Cloudflare replaces custom IDs: store provider IDs and include parent IDs in outgoing reply headers. See [thread correlation](thread-correlation.md).
 
 ## Verification before publishing/deploying
 
@@ -66,7 +70,7 @@ In an account and mailboxes you control, verify these before production rollout:
 - Subdomain receiving routes and each environment's deployed Worker.
 - Ingress response handling and application mailbox jobs.
 - Queue subscription, event encoding, handler persistence, and acknowledgements.
-- Actual delivered Message-ID and reply threading if using the legacy signed-ID helper.
+- Actual delivered provider Message-ID and reply threading.
 
 The automated suite needs no live account. Separate authorized isolated live runs
 are documented in the [live follow-up](verification/2026-09-10-followup.md).

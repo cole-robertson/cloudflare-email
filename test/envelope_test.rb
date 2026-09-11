@@ -35,10 +35,22 @@ class EnvelopeTest < Minitest::Test
     assert_equal :bad_signature, Verification.verify(**options.merge(version: "3"), signature: signature, now: 1750000000)
   end
 
-  def test_legacy_verification_does_not_authenticate_extra_envelope_headers
+  def test_legacy_signatures_are_rejected_even_with_valid_envelope_headers
     options = { secret: "fixture", body: "raw", timestamp: "1750000000" }
-    signature = Verification.sign(**options)
-    assert_equal :ok, Verification.verify(**options, envelope: "untrusted", signature: signature, now: 1750000000)
-    assert_equal :bad_signature, Verification.verify(**options, version: "2", envelope: Envelope.encode(from: "", to: "x@example.com"), signature: signature, now: 1750000000)
+    signature = Cloudflare::Email::Signing.hmac_hex("fixture", "1750000000.raw")
+    [nil, "1", "2"].each do |version|
+      assert_equal :bad_signature, Verification.verify(**options, version: version,
+        envelope: Envelope.encode(from: "", to: "x@example.com"), signature: signature, now: 1750000000)
+    end
+  end
+
+  def test_signing_requires_a_valid_envelope_and_supported_version
+    options = { secret: "fixture", body: "raw", timestamp: "1750000000" }
+    [nil, "1", "3"].each do |version|
+      assert_raises(ArgumentError) { Verification.sign(**options, version: version, envelope: Envelope.encode(from: "", to: "x@example.com")) }
+    end
+    [nil, "!", ""].each do |envelope|
+      assert_raises(ArgumentError) { Verification.sign(**options, envelope: envelope) }
+    end
   end
 end
