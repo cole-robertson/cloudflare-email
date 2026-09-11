@@ -1,0 +1,34 @@
+<nav class="breadcrumbs" aria-label="Breadcrumb">
+  <%= link_to "Mailboxes", root_path %> <span aria-hidden="true">/</span>
+  <%= link_to @mailbox.name, mailbox_path(@mailbox.id) %> <span aria-hidden="true">/</span>
+  <span>Message</span>
+</nav>
+<div class="page-heading">
+  <div><p class="eyebrow">Received message</p><h1><%= @subject.presence || "(No subject)" %></h1></div>
+  <div class="actions">
+    <% if allowed?(:mark_read, @mailbox) %>
+      <%= button_to(@entry.read_at ? "Mark unread" : "Mark read", mark_read_mailbox_path(@mailbox.id), method: :post, params: { message_id: @entry.id, read: @entry.read_at ? "false" : "true" }, class: "button button-secondary") %>
+    <% end %>
+    <% if allowed?(:archive, @mailbox) %>
+      <%= button_to(@entry.archived_at ? "Unarchive" : "Archive", archive_mailbox_path(@mailbox.id), method: :post, params: { message_id: @entry.id, archived: @entry.archived_at ? "false" : "true" }, class: "button button-secondary") %>
+    <% end %>
+  </div>
+</div>
+<article class="panel" aria-label="Email message">
+  <div class="panel-body">
+    <dl class="message-metadata">
+      <dt>From</dt><dd><%= @from.presence || "(Unknown sender)" %></dd>
+      <dt>To</dt><dd><%= @entry.recipient %></dd>
+      <dt>Received</dt><dd><time datetime="<%= @entry.created_at.iso8601 %>"><%= @entry.created_at.utc.strftime("%b %-d, %Y · %H:%M UTC") %></time></dd>
+      <dt>Status</dt><dd><%= @entry.read_at ? "Read" : "Unread" %><%= " · Archived" if @entry.archived_at %></dd>
+    </dl>
+  </div>
+  <div class="message-body"><pre><%= @body.presence || "No text content is available for this message." %></pre></div>
+  <% if @attachments.any? %>
+    <section class="panel-body attachments" aria-labelledby="attachments-heading">
+      <h2 id="attachments-heading">Attachments</h2>
+      <p class="field-help">File names are shown for reference. Downloads are not available in this dashboard.</p>
+      <ul><% @attachments.each do |filename| %><li><%= filename.presence || "Unnamed attachment" %></li><% end %></ul>
+    </section>
+  <% end %>
+</article>

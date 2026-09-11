@@ -83,7 +83,9 @@ See [managed mailbox setup](mailboxes.md) for the application-facing API and
 The gem supplies email infrastructure and optional managed mailbox records.
 Your app supplies users, mailbox permissions, conversation records, custom folders, search, compose screens,
 drafts and any AI review or approval workflow. It also decides unsubscribe and
-recipient eligibility policy. The gem does not supply an inbox UI or AI agent.
+recipient eligibility policy. The optional [management engine](management-engine.md)
+adds server-rendered mailbox administration and plain-text message previews.
+It does not supply a compose/conversation product or AI agent.
 
 An authenticated SMTP envelope tells your app which address Cloudflare received
 the message for. It does not prove the human sender's identity. Reply correlation

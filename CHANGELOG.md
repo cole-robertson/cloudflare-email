@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Add an opt-in server-rendered mailbox management engine with host authentication,
+  mailbox/domain scoping and per-action permissions. Manage mailboxes and aliases,
+  suspend/resume, preview plain-text messages and mark read/archive without
+  JavaScript or asset pipeline dependencies. The engine is never mounted by default.
+
 - Fix managed domain and address activation in Rails apps with strict readonly
   attributes enabled. Normalize immutable identities only when creating records;
   later lifecycle updates retain the original domain and address.

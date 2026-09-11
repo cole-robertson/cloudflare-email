@@ -294,6 +294,8 @@ lookup. Drain existing ActionMailbox/ActiveStorage queues before enabling this
 mode: previously serialized jobs without the new metadata are rejected.
 
 The gem does not create organizations/users, verify customer domain ownership,
-provide IMAP/POP, or supply an inbox UI. The original Rebulk document-processing
+provide IMAP/POP, or supply a full compose/conversation inbox. The optional
+[management engine](management-engine.md) supplies mailbox administration and
+plain-text previews using your host's access policy. The original Rebulk document-processing
 Worker contract and sender-review policy still need a separate application
 migration; installing this module does not replace that live pipeline.

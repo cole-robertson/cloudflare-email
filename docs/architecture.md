@@ -92,4 +92,6 @@ silently impose a marketing subscription model on transactional mail.
 The optional [mailbox module](mailboxes.md) now packages mailbox persistence and
 address management over the existing transport/receipt APIs. It includes a
 [tenant adapter](activerecord-tenanted.md), without adding a tenant library to
-the plain Ruby client. A future inbox UI or starter should consume these APIs.
+the plain Ruby client. The optional [management engine](management-engine.md)
+consumes these same APIs with host-supplied authentication and authorization.
+Full inbox products can continue using them through their own frontends.

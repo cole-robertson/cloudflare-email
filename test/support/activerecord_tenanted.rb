@@ -82,7 +82,9 @@ class ActualTenantedMailboxTest < Minitest::Test
   def test_actual_library_isolates_same_numeric_ids_and_restores_context
     records = %w[alpha beta].map do |key|
       Tenancy.with(key) do
-        mailbox = Mailboxes::Mailbox.create!(name: key, tenant_key: key, state: "active")
+        # Exercise an intentional ID collision independently of test order:
+        # deleting rows does not reset each SQLite database's sequence.
+        mailbox = Mailboxes::Mailbox.create!(id: 123, name: key, tenant_key: key, state: "active")
         assert_equal key, mailbox.tenant
         assert_equal key, TenantRecord.current_tenant
         assert_equal [key], Mailboxes::Mailbox.pluck(:name)
