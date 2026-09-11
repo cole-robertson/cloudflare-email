@@ -4,14 +4,37 @@ Ruby client for [Cloudflare Email Service](https://developers.cloudflare.com/ema
 
 Version **0.2.0** (release candidate). Ruby 3.2+, Rails 7.2–8.1; Ruby 4.0 is tested with Rails 8.1. Supported test floors are Rails 7.2.3.2, 8.0.5.1, and 8.1.3.1. Prefer a maintained Ruby/Rails release for new applications. The plain Ruby client uses Ruby's standard libraries plus the Base64 gem. Node is optional: Worker deployment also works through the included Ruby deployer. See [security guidance](SECURITY.md) for deployment responsibilities.
 
+## Start here
+
+**Sending email?** Start with the [step-by-step Rails guide](docs/getting-started.md).
+**Building a mailbox?** Follow the same guide through receiving, the SQLite-compatible outbox, and delivery tracking.
+**Using plain Ruby?** Jump to [Plain Ruby](#plain-ruby); Rails and a database are optional.
+
+| Guide | What you will learn |
+| --- | --- |
+| [Features at a glance](docs/features.md) | Everything the gem handles, and what your app supplies |
+| [Getting started](docs/getting-started.md) | Install, send your first email, receive replies, and save reliable send operations |
+| [Troubleshooting](docs/troubleshooting.md) | What to check when mail or delivery updates do not arrive |
+| [Durable outbox](docs/outbox.md) | Detailed setup, callbacks, retries, and recovery |
+| [Delivery events](docs/delivery-events.md) | Cloudflare Queue setup and recipient status tracking |
+| [Upgrading to 0.2](docs/upgrading-0.2.md) | Changes needed for an existing installation |
+
+The sections below are the configuration and API reference.
+
 ## Install and send from Rails
 
-```sh
-bundle add cloudflare-email
-bin/rails generate cloudflare:email:install --no-inbound
+Until 0.2.0 is published, add the reviewed security release-candidate commit to your Gemfile. RubyGems still serves 0.1.0, which does not include the features described here:
+
+```ruby
+gem "cloudflare-email",
+  git: "https://github.com/cole-robertson/cloudflare-email.git",
+  ref: "661cd2f483973c0f3e0cd4aa091562b009300419"
 ```
 
-Until 0.2.0 is published, pin a reviewed commit from this repository to try the new features; RubyGems still serves 0.1.0.
+```sh
+bundle install
+bin/rails generate cloudflare:email:install --no-inbound
+```
 
 Add Rails credentials (encrypted, per environment) or environment variables:
 
@@ -262,7 +285,7 @@ Errors inherit from `Cloudflare::Email::Error`: `ConfigurationError`, `Authentic
 
 ## Observability and permissions
 
-Notifications: `cloudflare_email.send` / `send_raw` include `account_id`, `path`, `status`, `message_id`, and all four recipient outcome arrays. `cloudflare_email.ingress` includes `bytes`, `result` (`ok`, `duplicate`, `bad_signature`, `stale`), and the stored `message_id` when available. `cloudflare_email.delivery_event` wraps handler execution with `event_id`, `message_id`, and lifecycle `status`; it does not report queue acknowledgement completion. Instrumentation errors include ActiveSupport's exception metadata.
+Notifications: `cloudflare_email.send` / `send_raw` include `account_id`, `path`, `status`, `message_id`, and all four recipient outcome arrays. `cloudflare_email.ingress` includes `bytes`, `result` (`ok`, `duplicate`, `bad_signature`, `stale`, `too_large`), and the stored `message_id` when available. `cloudflare_email.delivery_event` wraps handler execution with `event_id`, `message_id`, and lifecycle `status`; it does not report queue acknowledgement completion. Instrumentation errors include ActiveSupport's exception metadata.
 
 | Task | Purpose / credentials |
 |---|---|
