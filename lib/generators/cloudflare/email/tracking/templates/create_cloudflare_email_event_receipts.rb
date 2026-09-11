@@ -1,5 +1,5 @@
 class CreateCloudflareEmailEventReceipts < ActiveRecord::Migration[7.1]
-  def change
+  def up
     create_table :cloudflare_email_event_receipts do |t|
       t.string :account_id, null: false
       t.string :event_id, null: false
@@ -14,5 +14,9 @@ class CreateCloudflareEmailEventReceipts < ActiveRecord::Migration[7.1]
     add_index :cloudflare_email_event_receipts, [:account_id, :message_id],
       name: "idx_cf_email_receipts_account_message"
     add_index :cloudflare_email_event_receipts, [:state, :id], name: "idx_cf_email_receipts_replay"
+  end
+
+  def down
+    raise ActiveRecord::IrreversibleMigration, "Preserve event deduplication evidence; use a forward fix or a reconciled backup"
   end
 end

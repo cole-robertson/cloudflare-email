@@ -40,6 +40,34 @@ jobs:
       - run: bundle exec ruby script/verify_package.rb
         if: matrix.ruby == '3.4' && matrix.rails == '8_1'
 
+  postgres-outbox:
+    name: PostgreSQL durable outbound concurrency
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: cloudflare_email_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      BUNDLE_GEMFILE: "${{ github.workspace }}/gemfiles/postgres.gemfile"
+      POSTGRES_TEST_URL: postgres://postgres:postgres@localhost:5432/cloudflare_email_test
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+          bundler-cache: true
+      - run: bundle exec ruby script/verify_postgres_outbox.rb
+
   worker:
     name: Cloudflare Worker (JavaScript)
     runs-on: ubuntu-latest

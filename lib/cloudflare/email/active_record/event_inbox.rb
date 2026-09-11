@@ -1,6 +1,7 @@
 require "active_record"
 require "cloudflare/email/error"
 require "cloudflare/email/delivery_event"
+require "cloudflare/email/message_id"
 require "cloudflare/email/active_record/event_receipt"
 
 module Cloudflare
@@ -20,7 +21,7 @@ module Cloudflare
 
             event = DeliveryEvent.new(event.raw)
             receipt = EventReceipt.create_or_find_by!(account_id: event.account_id, event_id: event.event_id) do |row|
-              row.message_id = event.message_id
+              row.message_id = MessageId.normalize(event.message_id)
               row.payload_json = JSON.generate(event.raw)
               row.state = "pending"
             end
@@ -61,7 +62,7 @@ module Cloudflare
 
             scope = EventReceipt.where(state: ["pending", "unmatched"])
             scope = scope.where(account_id: account_id) if account_id
-            scope = scope.where(message_id: message_id) if message_id
+            scope = scope.where(message_id: MessageId.normalize(message_id)) if message_id
             count = 0
             scope.find_each(batch_size: batch_size) do |receipt|
               apply(receipt, &handler)

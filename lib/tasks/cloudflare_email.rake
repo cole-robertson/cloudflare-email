@@ -52,5 +52,31 @@ namespace :cloudflare do
         batch_size: Integer(ENV.fetch("BATCH_SIZE", "5"), 10),
       )
     end
+
+    desc "Send a prepared durable operation using OPERATION_KEY (no new message is generated)"
+    task deliver: :environment do
+      require "cloudflare/email/send_job"
+      delivery = Cloudflare::Email::SendJob.perform_now(
+        Cloudflare::Email::Credentials.account_id, ENV.fetch("OPERATION_KEY"))
+      puts "operation=#{delivery.operation_key} state=#{delivery.state}"
+    end
+
+    desc "Replay durable outbound receipts for the configured account (optional MESSAGE_ID)"
+    task replay_events: :environment do
+      require "cloudflare/email/replay_events_job"
+      count = Cloudflare::Email::ReplayEventsJob.perform_now(
+        Cloudflare::Email::Credentials.account_id, ENV["MESSAGE_ID"])
+      puts "Replayed #{count} receipt(s)."
+    end
+
+    desc "List prepared or uncertain outbound operations requiring dispatch or operator review"
+    task pending_deliveries: :environment do
+      require "cloudflare/email/active_record"
+      Cloudflare::Email::ActiveRecord::OutboundDelivery.where(
+        account_id: Cloudflare::Email::Credentials.account_id,
+        state: %w[prepared sending unknown partial]).find_each do |delivery|
+        puts "operation=#{delivery.operation_key} state=#{delivery.state} updated_at=#{delivery.updated_at.iso8601}"
+      end
+    end
   end
 end

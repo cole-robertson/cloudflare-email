@@ -1,6 +1,6 @@
 # cloudflare-email
 
-Ruby client for [Cloudflare Email Service](https://developers.cloudflare.com/email-service/), with an ActionMailer delivery method, an ActionMailbox ingress, a signed forwarding Worker, and an outbound delivery-event consumer.
+Ruby client for [Cloudflare Email Service](https://developers.cloudflare.com/email-service/), with ActionMailer, authenticated ActionMailbox ingress, a forwarding Worker, and optional durable Rails sending and delivery-event tracking.
 
 Version **0.2.0** (release candidate). Ruby 3.2+, Rails 7.1–8.1; Ruby 4.0 is tested with Rails 8.1. Prefer a maintained Ruby/Rails release for new applications. The plain Ruby client uses Ruby's standard libraries plus the Base64 gem. Node is optional: Worker deployment also works through the included Ruby deployer.
 
@@ -11,7 +11,7 @@ bundle add cloudflare-email
 bin/rails generate cloudflare:email:install --no-inbound
 ```
 
-Until 0.2.0 is published, use this repository's update branch or a local checkout to try the new features; RubyGems still serves 0.1.0.
+Until 0.2.0 is published, pin a reviewed commit from this repository to try the new features; RubyGems still serves 0.1.0.
 
 Add Rails credentials (encrypted, per environment) or environment variables:
 
@@ -54,6 +54,40 @@ WelcomeMailer.welcome(user).deliver_later
 ```
 
 Multipart, attachments, cc/bcc, and threading headers are serialized through `send_raw`. Cloudflare still controls final delivery and header acceptance.
+
+## Durable mailbox delivery from Rails
+
+For a mailbox application, use the optional outbox instead of recreating send
+claims, attempt records, recipient outcomes, and event correlation:
+
+```sh
+bin/rails generate cloudflare:email:tracking
+bin/rails generate cloudflare:email:outbox
+bin/rails db:migrate
+```
+
+```ruby
+account = Cloudflare::Email::Credentials.account_id
+operation = Cloudflare::Email::ActiveRecord::Outbox.prepare_mail(
+  account_id: account,
+  operation_key: "reply:#{draft.id}:revision:#{draft.revision}",
+  mail: ReplyMailer.reply(draft).message,
+)
+# Enqueue after the transaction that prepared the operation commits.
+Cloudflare::Email::SendJob.perform_later(account, operation.operation_key)
+```
+
+The job sends the stored MIME once per operation claim. Accepted repeats cannot
+resend; uncertain sends remain blocked for audited reconciliation. Each recipient
+has separate acceptance evidence and lifecycle status. `DeliveryEvents` persists,
+deduplicates, correlates, orders, and replays queue events, with transactional
+callbacks for your product records. The reference Rails inbox uses these same
+tables and APIs for compose, replies, approved AI drafts, and recovery.
+
+`ReplyMailer`, `draft`, and its revision are application examples. Authorize the
+send before preparation and use a durable job backend. See the [complete outbox
+setup and recovery guide](docs/outbox.md) and [gem/inbox architecture](docs/architecture.md).
+The adapter is opt-in; the plain Ruby client does not load Rails or ActiveRecord.
 
 ## Plain Ruby
 
@@ -192,6 +226,11 @@ delivery) and `DeliveryEvent#supersedes?(occurred_at:, terminal:)` for ordering
 matched recipient events. See the [architecture guide](docs/architecture.md) for
 what the gem provides and what belongs in the inbox product.
 
+Applications using the outbox can use `DeliveryEvents.record(event)` and
+`DeliveryEvents.replay(account_id:, message_id:)` for built-in correlation and
+recipient-state projection. Applications with their own delivery schema can
+continue to use the lower-level `EventInbox` with an explicit handler.
+
 ## Thread correlation
 
 Prefer storing the provider's returned `message_id` with your conversation and correlating inbound `In-Reply-To` / `References` against that record. Correlation does not authenticate the sender or authorize an action.
@@ -234,6 +273,15 @@ Notifications: `cloudflare_email.send` / `send_raw` include `account_id`, `path`
 | `provision_catchall DOMAIN=...` | Same routing management permissions; changes the zone-wide catch-all |
 | `dev` | Management token: Workers Scripts Edit; development only |
 | `consume_events` | Separate Queues Read/Write token, queue ID, configured handler |
+| `deliver OPERATION_KEY=...` | Dispatch a saved outbox operation using sending credentials |
+| `replay_events [MESSAGE_ID=...]` | Replay durable receipts for the configured account |
+| `pending_deliveries` | List prepared or uncertain outbox operations for operator review |
+
+The optional Rails adapter emits `cloudflare_email.outbox_prepare`,
+`cloudflare_email.outbox_send`, and `cloudflare_email.outbox_reconcile` notifications
+with operation identity and resulting state. These do not contain MIME or API
+tokens. A notification is method instrumentation; an enclosing application
+transaction may still roll back. Inspect the durable ledger for authoritative state.
 
 Management tasks fall back to the runtime token if `management_token` is unset. Restrict scopes and accounts to the operations you need. Event consumers use a separate `queues_token` and do not fall back to a send token.
 

@@ -14,8 +14,10 @@ durable infrastructure without copying the reference inbox's models and services
 | Authenticated v2 ingress and recipient-scoped deduplication | Map trusted recipient to an authorized mailbox |
 | `MessageId.normalize` and returned provider IDs | Store conversation membership and scope reply lookups |
 | Queue decoding, validation and ACK | Queue/subscription setup and recurring execution |
-| Optional ActiveRecord event receipts, deduplication and replay | Match event to an application send and update product records |
-| `DeliveryEvent#supersedes?` | Correlate account/message/recipient before applying an event |
+| Optional ActiveRecord event receipts, deduplication and indexed replay | Configure queue polling and receipt retention |
+| Immutable outbox snapshots, send claims, per-recipient outcomes | Authorize sending and choose a stable operation key |
+| `DeliveryEvents` account/message/recipient correlation and ordering | Transactional callback to update product records |
+| Send/replay jobs, recovery tasks and audited reconciliation | Authorize operators and provide evidence of provider outcome |
 
 The ActiveRecord adapter is explicit opt-in. Its generator installs a receipt table
 and initializer; the default plain Ruby client does not load ActiveRecord. Its
@@ -27,13 +29,11 @@ removed. Cloudflare's documented queue encodings and recipient-response forms ar
 provider contracts, so accepting them is not obsolete application compatibility.
 Historical verification reports describe their dated runs, not the current API.
 
-## Next extraction: durable outbound delivery
+## Implemented: durable outbound delivery
 
-The inbox's send claim, immutable attempt snapshot, uncertainty handling and
-reconciliation are reusable infrastructure in principle. They still reside in the
-application in this change. Moving only its models would leave consumers copying
-the critical orchestration, so the next extraction should provide one opt-in
-outbound operation API with these guarantees:
+The inbox now uses the gem's ledger tables and orchestration. Its model subclasses
+add application message associations and display snapshots; they do not maintain
+a second sending ledger. See the [outbox guide](outbox.md) for installation and API.
 
 1. Claim an application-supplied operation key scoped to an account using a unique
    index before sending; repeated or concurrent calls cannot silently resend.
@@ -42,18 +42,41 @@ outbound operation API with these guarantees:
 3. Separate preparation failures from ambiguous outcomes. A timeout, process death
    or persistence failure after acceptance keeps the operation blocked. An elapsed
    timeout alone never proves the message was not sent.
-4. Persist returned provider IDs and recipient outcomes, then replay unmatched
-   delivery events. Never claim the provider request and database commit are atomic.
+4. Persist validated provider IDs and recipient acceptance outcomes separately
+   from later lifecycle events. Replay correlates account, message and recipient;
+   conflicting IDs remain uncertain. The network and database are not atomic.
 5. Expose audited reconciliation with caller-supplied actor/reason and evidence.
    The application authorizes the operator; the gem enforces legal transitions.
 6. Provide jobs/tasks and notifications that preserve the same claim on retries.
    Include migration/import support for the reference inbox's existing attempts.
 
-Before this becomes the default, test two concurrent senders, process termination
-during the request, acceptance followed by failed persistence, partial recipient
-acceptance, event-before-response, and recovery without a duplicate send. Exercise
-SQLite and PostgreSQL concurrency. Existing inbox recovery tests are a useful
-baseline, not evidence that an unimplemented generic ledger already works.
+The suite exercises concurrent senders, actual process termination, acceptance
+followed by persistence failure, partial recipients, event-before-response,
+out-of-order events, callbacks that roll back, and recovery without a duplicate
+send. PostgreSQL and SQLite run separate concurrency checks. Inbox HTTP and browser
+workflows use the shared implementation, with controlled local provider responses.
+
+Historic attempts did not preserve rendered MIME. Their import retains available
+bodies, IDs, outcomes and operator evidence and marks reconstructed snapshots.
+Unknown historical outcomes remain blocked. No migration claims to recreate the
+exact bytes of a previously sent message.
+
+## Operational completion
+
+The reference inbox supplies a functional mailbox product over these APIs. Before
+production use, configure sending DNS and receiving routes, queue subscriptions
+and dead-letter handling, durable Rails jobs, receipt/MIME retention and backups,
+and monitoring for prepared/sending/unknown/partial operations. Exercise live
+external mailbox delivery and recovery with the deployed revision. Installation
+does not automatically provision domains or deploy infrastructure.
+
+Current limitations are deliberate and visible: no provider exactly-once API,
+no automatic resend of uncertain or rejected operations, no multi-provider-ID
+operation (conflicting IDs require review), and no durable inbound Worker buffer.
+A prepared operation can be dispatched using its existing identity after a job
+enqueue failure; sending/unknown operations require evidence-based reconciliation.
+Notifications indicate method execution and may run inside an outer transaction;
+the durable database record is authoritative.
 
 ## Keep in the inbox product
 

@@ -19,7 +19,7 @@ module Cloudflare
       ].freeze
       PRE_SEND_NETWORK = [Net::OpenTimeout, Errno::ECONNREFUSED, Errno::EHOSTUNREACH, SocketError].freeze
 
-      attr_reader :account_id, :base_url, :retries, :timeout
+      attr_reader :account_id, :base_url, :retries, :timeout, :retry_ambiguous
 
       def initialize(account_id:, api_token:, base_url: DEFAULT_BASE_URL,
                      retries: DEFAULT_RETRIES, timeout: DEFAULT_TIMEOUT,
