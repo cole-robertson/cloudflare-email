@@ -53,7 +53,17 @@ module Cloudflare
             payload[:result] = :bad_signature
             head :unauthorized
           when :ok
-            inbound = persist_inbound
+            inbound = if defined?(Cloudflare::Email::Mailboxes) && Cloudflare::Email::Mailboxes.enabled?
+              recipient = Cloudflare::Email::Envelope.decode(request.headers["X-CF-Email-Envelope"]).fetch("to")
+              begin
+                Cloudflare::Email::Mailboxes.receive(recipient: recipient) { persist_inbound }
+              rescue Cloudflare::Email::Mailboxes::Unavailable
+                payload[:result] = :unavailable_mailbox
+                next head(:unprocessable_entity)
+              end
+            else
+              persist_inbound
+            end
             payload[:result]     = inbound ? :ok : :duplicate
             payload[:message_id] = inbound&.message_id
             head :ok

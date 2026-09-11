@@ -1,8 +1,8 @@
 # Security
 
-The current hardening work targets the unreleased 0.2.0 branch. The published
-0.1.0 gem does not include it. Use a reviewed commit containing the fixes until
-a release is published, and redeploy the bundled Worker when upgrading.
+The hardening described here is included in 0.2.0. Version 0.1.0 does not include
+these fixes. Upgrade Rails and the bundled Worker together using the
+[upgrade guide](docs/upgrading-0.2.md).
 
 Rails integration is tested on patched Rails 7.2, 8.0, and 8.1; application
 owners must update their own Rails, database adapter, and other dependencies.
@@ -34,6 +34,14 @@ Do not place secrets or private message data in public issues.
 - Database administrators and direct SQL writes are trusted. ActiveRecord
   read-only evidence fields do not provide tamper-proof storage. Keep tenant
   authorization around outbox operations and receipt access in the application.
+- The optional mailbox session scopes tenant and mailbox access, but does not
+  authenticate users. Keep domain registration/activation administrative, verify
+  ownership externally, and use your access resolver to choose tenant keys.
+  Ingress selects a registered tenant only after full signature verification.
+  Raw ActiveRecord access remains privileged, especially in shared-database mode.
+  Private tenant storage, consistent migrations and trusted job payloads are
+  required. Drain old framework jobs before enabling database tenancy; jobs
+  without the new tenant metadata are rejected rather than guessing a tenant.
 - Development tunnels expose the ingress to the internet. Use the bundled task,
   dedicated development mail routes and test data; stop tunnels when finished.
   The Host guard restricts routing but is not a sandbox for the development app

@@ -8,9 +8,10 @@ module Cloudflare
         include ::ActiveRecord::Generators::Migration
         namespace "cloudflare:email:outbox"
         source_root File.expand_path("templates", __dir__)
+        class_option :migrations_path, type: :string, default: "db/migrate"
 
         def copy_outbox_migration
-          migration_template "create_cloudflare_email_outbox.rb", "db/migrate/create_cloudflare_email_outbox.rb"
+          migration_template "create_cloudflare_email_outbox.rb", File.join(options[:migrations_path], "create_cloudflare_email_outbox.rb")
         end
 
         def create_initializer

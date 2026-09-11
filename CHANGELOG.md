@@ -1,6 +1,15 @@
 # Changelog
 
-## 0.2.0 — Unreleased
+## 0.2.0 — 2026-09-11
+
+- Add optional managed mailboxes: domain directory, addresses/aliases, lifecycle,
+  incoming memberships, read/archive/purge APIs and raw-mail retention.
+- Add explicit tenant connections, tenant-aware framework and mailbox jobs,
+  mailbox-authorized outbox sends, shared event intake/correlation and recovery.
+  Verify separate SQLite databases and actual `activerecord-tenanted` integration;
+  no new runtime dependency for plain Ruby consumers.
+- Add a mailbox generator with separate shared/tenant migration paths and
+  user guides for mailbox management and database tenancy.
 
 - Bound Rails and Worker inbound reads to 25 MiB by default; reject malformed or
   stale signing headers before reading MIME. Require HTTPS remote endpoints.

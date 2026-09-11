@@ -62,4 +62,7 @@ Dir.mktmpdir("cloudflare-email-package-") do |temporary|
   run!({ "CLOUDFLARE_EMAIL_TEST_GEM_ROOT" => extracted }, RbConfig.ruby,
        File.join(root, "test/support/outbound_integration.rb"), chdir: root)
   puts "PASS: packaged outbound snapshots, jobs, and delivery-event projection"
+  run!({ "CLOUDFLARE_EMAIL_TEST_GEM_ROOT" => extracted }, RbConfig.ruby,
+       File.join(root, "test/support/mailbox_ingress.rb"), chdir: root)
+  puts "PASS: packaged tenant mailbox ingress, routing jobs, retention, and migrations"
 end

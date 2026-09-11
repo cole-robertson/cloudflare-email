@@ -5,13 +5,16 @@ services. You can use just the sending client, add incoming mail, or build a
 mailbox on top of the optional database-backed delivery tools.
 
 Start with [Getting started](getting-started.md) for working examples. These
-features describe the unreleased **0.2.0** code; use the commit pinned in that
-guide until the release is published.
+features are available in **0.2.0**. Database multi-tenancy is **off by default**:
+the optional mailbox module works in one database unless you explicitly configure
+a tenant connection adapter. A mailbox tenant key alone does not switch databases.
 
 ## Choose the pieces you need
 
 | You want to… | Use | What you get |
 | --- | --- | --- |
+| Create managed inboxes in code | Optional `Mailboxes` module | Named mailboxes, aliases, ownership references, read/archive state and retained raw mail |
+| Isolate organizations in separate databases | Optional `Tenancy` adapter | Configurable ActiveRecord base, tenant-aware jobs and shared-to-tenant event replay; tested with SQLite and `activerecord-tenanted` |
 | Send from an ordinary Ruby program | `Cloudflare::Email::Client` | Structured messages or complete raw MIME; no Rails/database required |
 | Send existing Rails mailers | ActionMailer delivery method | Your mailer templates, attachments, multipart bodies, cc/bcc and reply headers sent through Cloudflare |
 | Receive email in Rails | Email Worker + ActionMailbox | Unchanged raw MIME, attachments, authenticated SMTP envelope metadata and duplicate handling |
@@ -72,10 +75,13 @@ validation rejects malformed schema fields; original receipt identity and
 payload are read-only through normal ActiveRecord updates. These safeguards do
 not make database administrators untrusted or provide exactly-once delivery.
 
+See [managed mailbox setup](mailboxes.md) for the application-facing API and
+[activerecord-tenanted](activerecord-tenanted.md) for separate SQLite databases.
+
 ## What belongs in your mailbox application
 
-The gem supplies the email and delivery infrastructure. Your app supplies users,
-mailbox permissions, conversation records, folders, search, compose screens,
+The gem supplies email infrastructure and optional managed mailbox records.
+Your app supplies users, mailbox permissions, conversation records, custom folders, search, compose screens,
 drafts and any AI review or approval workflow. It also decides unsubscribe and
 recipient eligibility policy. The gem does not supply an inbox UI or AI agent.
 

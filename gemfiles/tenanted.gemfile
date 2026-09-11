@@ -1,0 +1,7 @@
+source "https://rubygems.org"
+
+gemspec path: ".."
+
+gem "rails", "~> 8.1.0", ">= 8.1.3.1"
+gem "sqlite3", ">= 2.9.6"
+gem "activerecord-tenanted", "~> 0.8.0"

@@ -1,6 +1,8 @@
 # Upgrade from 0.1.0 to 0.2.0
 
-0.2.0 adds delivery events and changes defaults where 0.1.0 could resend mail or misconfigure routing. It is prepared as a release candidate; publishing the gem is a separate step.
+0.2.0 adds delivery events, optional managed mailboxes and opt-in tenant adapters,
+and changes defaults where 0.1.0 could resend mail or misconfigure routing.
+Database multi-tenancy remains off unless explicitly configured.
 
 ## Application changes
 

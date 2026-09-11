@@ -2,7 +2,7 @@
 
 Ruby client for [Cloudflare Email Service](https://developers.cloudflare.com/email-service/), with ActionMailer, authenticated ActionMailbox ingress, a forwarding Worker, and optional durable Rails sending and delivery-event tracking.
 
-Version **0.2.0** (release candidate). Ruby 3.2+, Rails 7.2–8.1; Ruby 4.0 is tested with Rails 8.1. Supported test floors are Rails 7.2.3.2, 8.0.5.1, and 8.1.3.1. Prefer a maintained Ruby/Rails release for new applications. The plain Ruby client uses Ruby's standard libraries plus the Base64 gem. Node is optional: Worker deployment also works through the included Ruby deployer. See [security guidance](SECURITY.md) for deployment responsibilities.
+Version **0.2.0**. Ruby 3.2+, Rails 7.2–8.1; Ruby 4.0 is tested with Rails 8.1. Supported test floors are Rails 7.2.3.2, 8.0.5.1, and 8.1.3.1. Prefer a maintained Ruby/Rails release for new applications. The plain Ruby client uses Ruby's standard libraries plus the Base64 gem. Node is optional: Worker deployment also works through the included Ruby deployer. See [security guidance](SECURITY.md) for deployment responsibilities.
 
 ## Start here
 
@@ -15,6 +15,8 @@ Version **0.2.0** (release candidate). Ruby 3.2+, Rails 7.2–8.1; Ruby 4.0 is t
 | [Features at a glance](docs/features.md) | Everything the gem handles, and what your app supplies |
 | [Getting started](docs/getting-started.md) | Install, send your first email, receive replies, and save reliable send operations |
 | [Troubleshooting](docs/troubleshooting.md) | What to check when mail or delivery updates do not arrive |
+| [Managed mailboxes](docs/mailboxes.md) | Create inboxes and aliases, read/archive mail, and send from a mailbox |
+| [SQLite tenant databases](docs/activerecord-tenanted.md) | Give each organization its own SQLite database with `activerecord-tenanted` |
 | [Durable outbox](docs/outbox.md) | Detailed setup, callbacks, retries, and recovery |
 | [Delivery events](docs/delivery-events.md) | Cloudflare Queue setup and recipient status tracking |
 | [Upgrading to 0.2](docs/upgrading-0.2.md) | Changes needed for an existing installation |
@@ -23,12 +25,10 @@ The sections below are the configuration and API reference.
 
 ## Install and send from Rails
 
-Until 0.2.0 is published, add the reviewed security release-candidate commit to your Gemfile. RubyGems still serves 0.1.0, which does not include the features described here:
+Add version 0.2 to your Gemfile. Existing 0.1 users should follow the [upgrade guide](docs/upgrading-0.2.md), including the coordinated Rails/Worker update:
 
 ```ruby
-gem "cloudflare-email",
-  git: "https://github.com/cole-robertson/cloudflare-email.git",
-  ref: "661cd2f483973c0f3e0cd4aa091562b009300419"
+gem "cloudflare-email", "~> 0.2.0"
 ```
 
 ```sh
@@ -77,6 +77,47 @@ WelcomeMailer.welcome(user).deliver_later
 ```
 
 Multipart, attachments, cc/bcc, and threading headers are serialized through `send_raw`. Cloudflare still controls final delivery and header acceptance.
+
+## Managed mailboxes and optional tenancy
+
+**Multi-tenancy is off by default.** Installing the gem does not create tenant
+databases, install a tenancy library, or change your application's database routing.
+
+| Setup | What you explicitly enable |
+| --- | --- |
+| Plain Ruby sending | Nothing extra; no Rails/database required |
+| Managed mailboxes in one database | Run the mailbox generator and load the optional module |
+| Separate tenant databases | Configure `Tenancy.configure(...)` with your application's base class and switching adapter before loading models |
+
+The mailbox API uses a tenant key to group and scope records even in one database.
+That key alone does not enable database switching. `activerecord-tenanted` is an
+optional application dependency, not a runtime dependency of this gem.
+
+Create mailboxes in code with the optional mailbox module. It includes named
+mailboxes, aliases, ownership references, read/archive state, retained raw mail,
+mailbox-authorized sends, and tenant-aware delivery-event recovery:
+
+```sh
+bin/rails generate cloudflare:email:mailboxes
+bin/rails db:migrate
+```
+
+After registering and verifying a receiving domain:
+
+```ruby
+Cloudflare::Email::Mailboxes.for_tenant("organization-123") do |inboxes|
+  mailbox = inboxes.create(name: "Support", address: "support@acme.example.com",
+    owner_ref: "team:42")
+  # Provision and activate its address route before receiving or sending mail.
+end
+```
+
+Use one database or an application-provided tenant base class. The optional
+`activerecord-tenanted` integration is tested with separate SQLite databases,
+including jobs and overlapping record IDs. Your app still authorizes users and
+provides the UI. Start with [the mailbox guide](docs/mailboxes.md), and configure
+[tenant connections](docs/activerecord-tenanted.md) before loading models when
+using separate databases. Plain Ruby users do not load this module.
 
 ## Durable mailbox delivery from Rails
 

@@ -9,6 +9,9 @@ durable infrastructure without copying the reference inbox's models and services
 
 | Gem capability | Application responsibility |
 | --- | --- |
+| Optional mailbox/address directory and tenant connection adapter | Authorize domain ownership, provision tenant databases and grant user access |
+| Mailbox memberships, read/archive state and retained raw mail | Inbox UI, retention schedule and explicit purge policy |
+| Shared event intake, tenant correlation and tenant-aware jobs | Durable queue workers, scheduled recovery and schema rollout to every tenant |
 | Structured/raw sending and ActionMailer transport | Compose UI, recipients and send authorization |
 | `Response#accepted?`, plus individual recipient outcomes | Handle partial acceptance without resending accepted recipients |
 | Authenticated v2 ingress and recipient-scoped deduplication | Map trusted recipient to an authorized mailbox |
@@ -86,6 +89,7 @@ operator permissions also stay there. Suppression/unsubscribe requirements depen
 on message purpose and application policy; expose provider outcomes, but do not
 silently impose a marketing subscription model on transactional mail.
 
-A reusable inbox Rails engine or starter can later package common product setup.
-It should consume these gem APIs instead of maintaining another transport/receipt
-implementation. A new separate gem is unnecessary for the current optional adapter.
+The optional [mailbox module](mailboxes.md) now packages mailbox persistence and
+address management over the existing transport/receipt APIs. It includes a
+[tenant adapter](activerecord-tenanted.md), without adding a tenant library to
+the plain Ruby client. A future inbox UI or starter should consume these APIs.

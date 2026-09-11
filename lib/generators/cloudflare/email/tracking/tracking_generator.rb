@@ -8,9 +8,10 @@ module Cloudflare
         include ::ActiveRecord::Generators::Migration
         namespace "cloudflare:email:tracking"
         source_root File.expand_path("templates", __dir__)
+        class_option :migrations_path, type: :string, default: "db/migrate"
 
         def copy_tracking_migration
-          migration_template "create_cloudflare_email_event_receipts.rb", "db/migrate/create_cloudflare_email_event_receipts.rb"
+          migration_template "create_cloudflare_email_event_receipts.rb", File.join(options[:migrations_path], "create_cloudflare_email_event_receipts.rb")
         end
 
         def create_initializer
