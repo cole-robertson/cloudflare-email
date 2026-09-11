@@ -30,7 +30,7 @@ Until 0.2.0 is published, add the reviewed security release-candidate commit to 
 ```ruby
 gem "cloudflare-email",
   git: "https://github.com/cole-robertson/cloudflare-email.git",
-  ref: "661cd2f483973c0f3e0cd4aa091562b009300419"
+  ref: "4273c5ac10cb87d5e5610acc6a4e69c55d94a42f"
 ```
 
 ```sh
