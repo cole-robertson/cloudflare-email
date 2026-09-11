@@ -1,6 +1,7 @@
 require "net/http"
 require "json"
 require "uri"
+require "cloudflare/email/endpoint"
 
 module Cloudflare
   module Email
@@ -30,7 +31,7 @@ module Cloudflare
       def initialize(api_token:, api_base: API_BASE)
         raise ArgumentError, "api_token is required" if api_token.to_s.empty?
         @api_token = api_token
-        @api_base  = api_base
+        @api_base  = Endpoint.parse(api_base).to_s.delete_suffix("/")
       end
 
       # High-level: given an address + Worker name, do everything needed to

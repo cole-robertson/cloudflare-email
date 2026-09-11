@@ -65,6 +65,23 @@ class EventInboxTest < Minitest::Test
     assert_equal "message-456", receipt.event.message_id
   end
 
+  def test_receipt_identity_and_payload_remain_immutable_after_recording
+    receipt = Inbox.record(event)
+    original = receipt.attributes.slice("account_id", "event_id", "message_id", "payload_json")
+    original.each_key do |field|
+      begin
+        receipt.public_send("#{field}=", "changed")
+        receipt.save!
+      rescue ActiveRecord::ReadonlyAttributeError
+        # Rails versions either reject assignment or omit readonly updates.
+      end
+      assert_equal original, receipt.reload.attributes.slice(*original.keys)
+    end
+    Inbox.apply(receipt) { :applied }
+    assert_equal "applied", receipt.reload.state
+    assert_equal original, receipt.attributes.slice(*original.keys)
+  end
+
   def test_concurrent_duplicate_recording_uses_database_unique_constraint
     results = Queue.new
     threads = 4.times.map do

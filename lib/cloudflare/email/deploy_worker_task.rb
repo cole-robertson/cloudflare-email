@@ -20,6 +20,9 @@ module Cloudflare
         path = script_path
         raise "Worker script not found at #{path} — re-run `bin/rails g cloudflare:email:install`" unless File.exist?(path)
 
+        # Validate before uploading code or rotating any deployed secrets.
+        Endpoint.parse(url) unless url.to_s.empty?
+
         deployer = Cloudflare::Email::WorkerDeployer.new(
           account_id: account_id, api_token: management_token,
         )

@@ -68,6 +68,12 @@ class TaskOrchestrationTest < Minitest::Test
     refute_includes @io.string, "script deployed"
   end
 
+  def test_invalid_ingress_url_fails_before_upload_or_secret_rotation
+    assert_equal 1, deploy(ingress_url: "http://app.example.test/ingress")
+    assert_not_requested :any, %r{api.cloudflare.com}
+    refute_includes @io.string, "script deployed"
+  end
+
   def test_first_secret_failure_stops_before_ingress_url_update
     management_request(:put, script_path).to_return(success)
     secret = management_request(:put, "#{script_path}/secrets").with { |r| JSON.parse(r.body)["name"] == "INGRESS_SECRET" }
@@ -165,8 +171,8 @@ class TaskOrchestrationTest < Minitest::Test
 
   def test_event_handler_and_ack_failures_return_nonzero_without_claiming_success
     event = { "type" => "cf.email.sending.message.delivered", "source" => { "type" => "email.sending", "domain" => "example.test" },
-      "payload" => { "eventId" => "event", "messageId" => "message", "terminal" => true },
-      "metadata" => { "accountId" => ACCOUNT_ID, "eventSchemaVersion" => 1 } }
+      "payload" => { "eventId" => "event", "messageId" => "message", "terminal" => true, "recipient" => "user@example.net" },
+      "metadata" => { "accountId" => ACCOUNT_ID, "eventSchemaVersion" => 1, "eventTimestamp" => "2026-06-01T02:48:57Z" } }
     pull_url = "#{API}/accounts/#{ACCOUNT_ID}/queues/events/messages/pull"
     ack_url = "#{API}/accounts/#{ACCOUNT_ID}/queues/events/messages/ack"
     [:handler, :ack].each do |failure|

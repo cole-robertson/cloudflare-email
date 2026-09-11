@@ -33,6 +33,7 @@ Gem::Specification.new do |spec|
     "templates/worker/src/*.js",
     "templates/worker/test/*.test.ts",
     "README.md",
+    "SECURITY.md",
     "docs/**/*.md",
     "examples/*.rb",
     "CHANGELOG.md",
@@ -46,9 +47,9 @@ Gem::Specification.new do |spec|
   spec.add_development_dependency "minitest", "~> 5.20"
   spec.add_development_dependency "rake", "~> 13.0"
   spec.add_development_dependency "webmock", "~> 3.20"
-  spec.add_development_dependency "rails", ">= 7.1", "< 9.0"
-  # sqlite3 version pin is deferred to Gemfile + gemfiles/rails_*.gemfile
-  # variants because Rails 7.1 needs ~> 1.4 while 7.2+ needs >= 2.0.
+  spec.add_development_dependency "rails", ">= 7.2.3.2", "< 9.0"
+  # SQLite is optional runtime infrastructure; development/test bounds live
+  # in the Gemfile variants and include the current security fixes.
   spec.add_development_dependency "rack-test", "~> 2.1"
   # Rails through 8.1 passes a positional options hash to JSON.parse.
   spec.add_development_dependency "json", ">= 2.0", "< 3.0"

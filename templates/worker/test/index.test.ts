@@ -90,6 +90,46 @@ describe("cloudflare-email Worker", () => {
     expect(ok).toBe(true);
   });
 
+  it.each(["http://rails.test/inbound", "https://user:password@rails.test/inbound", "https://rails.test/inbound#fragment", "invalid"])(
+    "rejects invalid ingress URL %j before reading mail", async (url) => {
+      const { message, rejects } = makeMessage(RAW);
+      await worker.email(message as any, { RAILS_INGRESS_URL: url, INGRESS_SECRET: SECRET });
+      expect(rejects).toHaveLength(1);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(message.raw.locked).toBe(false);
+    },
+  );
+
+  it("allows loopback HTTP for local verification", async () => {
+    const { message, rejects } = makeMessage(RAW);
+    await worker.email(message as any, { RAILS_INGRESS_URL: "http://127.0.0.1:3000/inbound", INGRESS_SECRET: SECRET });
+    expect(rejects).toEqual([]);
+    expect(fetchSpy).toHaveBeenCalledOnce();
+  });
+
+  it("accepts mail at the configured size boundary", async () => {
+    const { message, rejects } = makeMessage(RAW);
+    await worker.email(message as any, { RAILS_INGRESS_URL: URL_, INGRESS_SECRET: SECRET, MAX_EMAIL_BYTES: String(message.rawSize) });
+    expect(rejects).toEqual([]);
+    expect(fetchSpy).toHaveBeenCalledOnce();
+  });
+
+  it.each([true, false])("enforces size limit with accurate rawSize=%j", async (accurate) => {
+    const { message, rejects } = makeMessage(RAW);
+    if (!accurate) message.rawSize = 0;
+    await worker.email(message as any, { RAILS_INGRESS_URL: URL_, INGRESS_SECRET: SECRET, MAX_EMAIL_BYTES: "16" });
+    expect(rejects).toHaveLength(1);
+    expect(rejects[0]).toMatch(/size limit/);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid size configuration", async () => {
+    const { message, rejects } = makeMessage(RAW);
+    await worker.email(message as any, { RAILS_INGRESS_URL: URL_, INGRESS_SECRET: SECRET, MAX_EMAIL_BYTES: "0" });
+    expect(rejects).toHaveLength(1);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it("rejects the message when upstream returns non-2xx", async () => {
     fetchSpy.mockResolvedValueOnce(new Response("server error", { status: 503 }));
     const env = { RAILS_INGRESS_URL: URL_, INGRESS_SECRET: SECRET };

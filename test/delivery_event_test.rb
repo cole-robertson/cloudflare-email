@@ -88,4 +88,28 @@ class DeliveryEventTest < Minitest::Test
       end
     end
   end
+
+  def test_rejects_malformed_projection_fields
+    invalid = {
+      ["payload", "recipient"] => [nil, "", "  ", [], "user\n@example.net"],
+      ["payload", "terminal"] => [nil, "false", "true", 0, 1],
+      ["metadata", "eventTimestamp"] => [nil, "", "tomorrow", 123, "2026-06-01T02:48:57Z\n"],
+      ["payload", "eventId"] => ["  ", "event\0id"],
+      ["payload", "messageId"] => ["  ", "message\rid"],
+      ["metadata", "accountId"] => ["  ", "account\nid"],
+      ["source", "domain"] => ["  ", "domain\tid"],
+    }
+    %w[delivery bounce complaint rejection failure].each do |field|
+      invalid[["payload", field]] = [nil, false, "detail", []]
+    end
+    invalid.each do |(section, key), values|
+      values.each do |value|
+        raw = event_data
+        raw[section][key] = value
+        assert_raises(Cloudflare::Email::ValidationError, "accepted malformed #{section}.#{key}") do
+          Cloudflare::Email::DeliveryEvent.new(raw)
+        end
+      end
+    end
+  end
 end

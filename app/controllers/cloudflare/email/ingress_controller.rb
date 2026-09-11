@@ -16,13 +16,28 @@ module Cloudflare
     # (or in the CLOUDFLARE_INGRESS_SECRET env var) and as the Worker secret
     # INGRESS_SECRET via `wrangler secret put INGRESS_SECRET`.
     class IngressController < ActionMailbox::BaseController
+      DEFAULT_MAX_EMAIL_BYTES = 25 * 1024 * 1024
       param_encoding :create, "raw_email", Encoding::ASCII_8BIT
 
       def create
         ActiveSupport::Notifications.instrument(
           "cloudflare_email.ingress",
-          bytes: raw_body.bytesize,
+          bytes: 0,
         ) do |payload|
+          preflight = Cloudflare::Email::Verification.verify_headers(secret: secret,
+            timestamp: request.headers["X-CF-Email-Timestamp"],
+            signature: request.headers["X-CF-Email-Signature"],
+            version: request.headers["X-CF-Email-Signature-Version"],
+            envelope: request.headers["X-CF-Email-Envelope"])
+          unless preflight == :ok
+            payload[:result] = preflight
+            next head(preflight == :stale ? :request_timeout : :unauthorized)
+          end
+          if request.content_length.to_i > max_email_bytes || raw_body.bytesize > max_email_bytes
+            payload[:result] = :too_large
+            next head(:payload_too_large)
+          end
+          payload[:bytes] = raw_body.bytesize
           case Cloudflare::Email::Verification.verify(
                 secret:    secret,
                 body:      raw_body,
@@ -75,7 +90,15 @@ module Cloudflare
       def raw_body
         @raw_body ||= begin
           request.body.rewind if request.body.respond_to?(:rewind)
-          request.body.read
+          request.body.read(max_email_bytes + 1).to_s
+        end
+      end
+
+      def max_email_bytes
+        @max_email_bytes ||= begin
+          value = Integer(ENV.fetch("MAX_EMAIL_BYTES", DEFAULT_MAX_EMAIL_BYTES.to_s), 10)
+          raise ArgumentError, "MAX_EMAIL_BYTES must be positive" unless value.positive?
+          value
         end
       end
 

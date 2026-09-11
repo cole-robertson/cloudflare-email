@@ -19,7 +19,7 @@ jobs:
       fail-fast: false
       matrix:
         ruby: ["3.2", "3.3", "3.4"]
-        rails: ["7_1", "7_2", "8_0", "8_1"]
+        rails: ["7_2", "8_0", "8_1"]
         exclude:
           - ruby: "3.2"
             rails: "8_0"
@@ -37,6 +37,8 @@ jobs:
           ruby-version: "${{ matrix.ruby }}"
           bundler-cache: true
       - run: bundle exec rake test
+      - run: gem install bundler-audit --version 0.9.3 --no-document
+      - run: bundler-audit check --update --gemfile-lock "gemfiles/rails_${{ matrix.rails }}.gemfile.lock"
       - run: bundle exec ruby script/verify_package.rb
         if: matrix.ruby == '3.4' && matrix.rails == '8_1'
 

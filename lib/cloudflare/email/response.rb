@@ -1,3 +1,5 @@
+require "cloudflare/email/message_id"
+
 module Cloudflare
   module Email
     class Response
@@ -9,8 +11,9 @@ module Cloudflare
       end
 
       def success?
-        return !!@raw["success"] if @raw.key?("success") && !@raw["success"].nil?
-        @status >= 200 && @status < 300
+        return false unless @status.is_a?(Integer) && @status >= 200 && @status < 300
+        return @raw["success"] == true if @raw.key?("success")
+        true
       end
 
       def result
@@ -20,14 +23,18 @@ module Cloudflare
       # Provider acceptance is not final delivery. A partial acceptance is true;
       # inspect recipient outcomes before retrying any rejected recipients.
       def accepted?
+        return false if %w[delivered queued permanent_bounces suppressed_recipients].any? { |key| result.key?(key) && !result[key].is_a?(Array) }
         success? && (delivered.any? || queued.any? ||
           (!message_id.to_s.strip.empty? && permanent_bounces.empty? && suppressed_recipients.empty?))
       end
 
       def message_id
-        result["message_id"] ||
+        value = result["message_id"] ||
           dig_message_id(result["delivered"]) ||
           dig_message_id(result["queued"])
+        return nil unless value.is_a?(String)
+        normalized = MessageId.normalize(value)
+        value unless normalized.empty? || normalized.match?(/[\s<>[:cntrl:]]/)
       end
 
       def delivered

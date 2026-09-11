@@ -44,7 +44,16 @@ up to 254 bytes, with a 64-byte local part, and an empty SMTP sender for bounces
 - Both deployment paths now target `cloudflare-email-ingress-<environment>`. Existing unsuffixed Workers are not deleted. Set both secrets on the new Worker, deploy, verify, then deliberately update the corresponding route.
 - The forwarding Worker now times out after 15 seconds and refuses redirects. Ensure the Rails URL is the final HTTPS endpoint. Both deployment paths use compatibility date 2026-09-10.
 - For an installer `--worker-dir` other than the default, pass `SCRIPT=your-directory/src/index.js` to the Ruby deploy task.
-- The development tunnel sets the origin Host to localhost, preserving Rails' normal development host authorization.
+- The development tunnel forces a dedicated origin Host and permits only POSTs to the email ingress. Restart the Rails development server after upgrading; the tunnel task verifies the ingress guard before starting.
+
+## Security hardening
+
+- Upgrade host applications to patched Rails: tested floors are 7.2.3.2, 8.0.5.1, and 8.1.3.1, with SQLite 2.9.6 in the test stacks. Rails 7.1 is no longer supported. These are development/test constraints, not runtime dependency enforcement in your application.
+- Redeploy the bundled Worker after updating the gem. Rails and the Worker now default to a 25 MiB raw-email limit. Set `MAX_EMAIL_BYTES` to the same positive integer on both sides when overriding it. Configure upstream request limits and deadlines too.
+- API and ingress endpoints require HTTPS, with HTTP allowed only for literal loopback development hosts. Remove URL credentials, fragments, and query options from configured Ruby endpoints.
+- Delivery events require recipient, ISO8601 timestamp, a boolean `terminal`, valid identifiers, and object-shaped optional details. Invalid messages remain unacknowledged; monitor and quarantine poison messages through your queue operations.
+- Event receipt identity and original payload are read-only through normal ActiveRecord updates. Privileged database access remains trusted.
+- See [the security review](verification/2026-09-11-security.md) for evidence and limits.
 - Subdomain routes require separately onboarded routing DNS and DNS Read access for preflight. The provisioner no longer enables the parent apex to make a subdomain work.
 - Catch-all provisioning is explicitly zone-wide. A request for a subdomain that resolves to a parent zone fails rather than replacing the parent's catch-all.
 - Apex enablement uses the current routing DNS API. Permission/setup errors stop provisioning; they are no longer ignored.

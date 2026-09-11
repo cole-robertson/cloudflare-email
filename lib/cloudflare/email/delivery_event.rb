@@ -17,9 +17,17 @@ module Cloudflare
                raw["payload"].is_a?(Hash) && raw["source"].is_a?(Hash) &&
                raw["source"]["type"] == "email.sending" && raw["metadata"].is_a?(Hash) &&
                raw["metadata"]["eventSchemaVersion"] == 1 &&
-               [event_id, message_id, account_id, domain].all? { |value| value.is_a?(String) && !value.empty? }
+               [event_id, message_id, account_id, domain, recipient].all? { |value| valid_identifier?(value) } &&
+               [true, false].include?(payload["terminal"]) &&
+               %w[delivery bounce complaint rejection failure].all? { |key| !payload.key?(key) || payload[key].is_a?(Hash) }
           raise ValidationError, "invalid Email Sending event or unsupported schema version"
         end
+        unless occurred_at.is_a?(String) && valid_identifier?(occurred_at)
+          raise ValidationError, "delivery event timestamp must be ISO8601"
+        end
+        Time.iso8601(occurred_at)
+      rescue ArgumentError
+        raise ValidationError, "delivery event timestamp must be ISO8601"
       end
 
       def type = raw["type"]
@@ -50,6 +58,12 @@ module Cloudflare
         incoming = Time.iso8601(self.occurred_at.to_s)
         previous = occurred_at.is_a?(Time) ? occurred_at : Time.iso8601(occurred_at.to_s) unless occurred_at.nil?
         previous.nil? || incoming > previous
+      end
+
+      private
+
+      def valid_identifier?(value)
+        value.is_a?(String) && !value.strip.empty? && !value.match?(/[[:cntrl:]]/)
       end
     end
   end

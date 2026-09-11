@@ -2,7 +2,7 @@
 
 Ruby client for [Cloudflare Email Service](https://developers.cloudflare.com/email-service/), with ActionMailer, authenticated ActionMailbox ingress, a forwarding Worker, and optional durable Rails sending and delivery-event tracking.
 
-Version **0.2.0** (release candidate). Ruby 3.2+, Rails 7.1–8.1; Ruby 4.0 is tested with Rails 8.1. Prefer a maintained Ruby/Rails release for new applications. The plain Ruby client uses Ruby's standard libraries plus the Base64 gem. Node is optional: Worker deployment also works through the included Ruby deployer.
+Version **0.2.0** (release candidate). Ruby 3.2+, Rails 7.2–8.1; Ruby 4.0 is tested with Rails 8.1. Supported test floors are Rails 7.2.3.2, 8.0.5.1, and 8.1.3.1. Prefer a maintained Ruby/Rails release for new applications. The plain Ruby client uses Ruby's standard libraries plus the Base64 gem. Node is optional: Worker deployment also works through the included Ruby deployer. See [security guidance](SECURITY.md) for deployment responsibilities.
 
 ## Install and send from Rails
 
@@ -179,7 +179,7 @@ bin/rails cloudflare:email:deploy_worker
 bin/rails cloudflare:email:dev
 ```
 
-The dev task requires `cloudflared`, refuses environments other than development, and updates the existing development Worker's URL to a temporary tunnel. It sends a localhost Host header to Rails so the normal development host check accepts the request. Configure a separate development receiving address and route. Stopping the tunnel leaves that URL in the development Worker until the next update. A Worker deployed without a URL rejects mail until the tunnel sets it.
+The dev task requires `cloudflared`, refuses environments other than development, and updates the existing development Worker's URL to a temporary tunnel. It forces a dedicated origin Host; development middleware permits only POSTs to the email ingress on that Host. Restart Rails after upgrading: the task checks that the guard is running before opening the tunnel. Configure a separate development receiving address and route. Stopping the tunnel leaves that URL in the development Worker until the next update. A Worker deployed without a URL rejects mail until the tunnel sets it.
 
 For a custom installer `--worker-dir`, pass `SCRIPT=custom-directory/src/index.js` to the Ruby `deploy_worker` task. The installer prints the corresponding command.
 

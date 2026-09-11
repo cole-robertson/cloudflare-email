@@ -1,4 +1,5 @@
 require "rails/engine"
+require "cloudflare/email/dev_ingress_guard"
 
 # Register the delivery method at engine load time (not inside an initializer)
 # so the `cloudflare_settings=` accessor exists before Rails' own
@@ -12,6 +13,10 @@ module Cloudflare
   module Email
     class Engine < ::Rails::Engine
       isolate_namespace Cloudflare::Email
+
+      initializer "cloudflare-email.development_ingress_guard" do |app|
+        app.middleware.insert_before 0, DevIngressGuard if Rails.env.development?
+      end
 
       config.before_initialize do
         unless defined?(::ActionMailbox::Engine)

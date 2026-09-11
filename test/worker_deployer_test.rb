@@ -40,6 +40,20 @@ class WorkerDeployerTest < Minitest::Test
     end
   end
 
+  def test_rejects_insecure_remote_api_endpoint_before_sending_credentials
+    assert_raises(Cloudflare::Email::ConfigurationError) do
+      make_deployer(api_base: "http://api.example.test/client/v4")
+    end
+    assert_not_requested :any, %r{api.example.test}
+  end
+
+  def test_rejects_insecure_ingress_secret_url_without_api_mutation
+    assert_raises(Cloudflare::Email::ConfigurationError) do
+      make_deployer.put_secret("RAILS_INGRESS_URL", "http://app.example.test/ingress")
+    end
+    assert_not_requested :any, %r{api.cloudflare.com}
+  end
+
   def test_deploy_uploads_script_as_multipart
     stub = stub_request(:put, script_url)
       .with { |req|

@@ -2,6 +2,7 @@ require "net/http"
 require "json"
 require "uri"
 require "time"
+require "cloudflare/email/endpoint"
 
 module Cloudflare
   module Email
@@ -25,18 +26,26 @@ module Cloudflare
                      retries: DEFAULT_RETRIES, timeout: DEFAULT_TIMEOUT,
                      initial_backoff: DEFAULT_BACKOFF, max_retry_after: MAX_RETRY_AFTER,
                      retry_ambiguous: false, logger: nil)
-        raise ConfigurationError, "account_id is required" if account_id.nil? || account_id.to_s.empty?
-        raise ConfigurationError, "api_token is required"  if api_token.nil?  || api_token.to_s.empty?
+        unless account_id.is_a?(String) && account_id.match?(/\A[a-zA-Z0-9_-]+\z/)
+          raise ConfigurationError, "account_id is required and must be a single account identifier"
+        end
+        unless api_token.is_a?(String) && !api_token.empty? && !api_token.match?(/\s/)
+          raise ConfigurationError, "api_token is required and must not contain whitespace"
+        end
 
         @account_id      = account_id
         @api_token       = api_token
-        @base_url        = base_url
+        @base_url        = Endpoint.parse(base_url).to_s.delete_suffix("/")
         @retries         = retries
         @timeout         = timeout
         @initial_backoff = initial_backoff
         @max_retry_after = max_retry_after
         @logger          = logger
         @retry_ambiguous = retry_ambiguous
+      end
+
+      def inspect
+        "#<#{self.class.name} account_id=#{@account_id.inspect} api_token=[REDACTED]>"
       end
 
       def send(from:, subject:, to: nil, text: nil, html: nil, cc: nil, bcc: nil,
@@ -199,7 +208,7 @@ module Cloudflare
 
         case status
         when 200..299
-          if body.is_a?(Hash) && body["success"] == false
+          if body.is_a?(Hash) && body.key?("success") && body["success"] != true
             raise Error.new(extract_message(body), status: status, response: body)
           end
           unless body.is_a?(Hash) && body["result"].is_a?(Hash)
@@ -239,7 +248,8 @@ module Cloudflare
 
       def log_retry(attempt, error)
         return unless @logger
-        @logger.warn("[cloudflare-email] retry #{attempt}: #{error.class}: #{error.message}")
+        # Provider messages can echo message content or other sensitive data.
+        @logger.warn("[cloudflare-email] retry #{attempt}: #{error.class}")
       end
     end
   end
