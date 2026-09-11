@@ -45,6 +45,11 @@ before returning; do not merely enqueue a non-durable job.
 
 ### Durable Rails receipts
 
+If you also use the [durable outbox](outbox.md), prefer `DeliveryEvents.record`
+and `DeliveryEvents.replay`: they provide account/message/recipient correlation
+and state ordering automatically. The lower-level example below supports an
+application's own delivery schema.
+
 ```sh
 bin/rails generate cloudflare:email:tracking
 bin/rails db:migrate
@@ -96,7 +101,7 @@ returning it. External effects and writes to other databases cannot be rolled ba
 Concurrent database conflicts raise; retry the job. Do not send email inside this
 handler; use durable outbound orchestration.
 
-Replay accepts optional `account_id:`, exact raw provider `message_id:`, and
+Replay accepts optional `account_id:`, normalized provider `message_id:`, and
 `batch_size:` filters. The batch size controls database fetch size, not the total
 number processed. `DeliveryEvent#supersedes?` accepts a Time or ISO8601 previous
 timestamp: only a newer known status replaces current state, equal timestamps keep
@@ -105,7 +110,10 @@ terminal complaint can replace delivery. Invalid timestamps raise. Match records
 and lock recipient state before using this ordering helper.
 
 Receipt retention, recurring jobs, and monitoring are application decisions. See
-the [gem/inbox boundary](architecture.md) for outbound-ledger scope.
+the [gem/inbox boundary](architecture.md) for outbound-ledger scope. Existing
+receipt tables from the earlier preproduction adapter must normalize stored
+`message_id` values with `MessageId.normalize` before using filtered replay;
+raw payloads remain unchanged. The reference inbox's outbox migration does this.
 
 Poll a single batch:
 

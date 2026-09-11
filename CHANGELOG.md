@@ -2,6 +2,16 @@
 
 ## 0.2.0 — Unreleased
 
+- Add an optional durable Rails outbox: immutable MIME/envelope snapshots,
+  account-scoped operation keys, committed send claims, per-recipient acceptance
+  evidence, blocked uncertain retries, and audited subset reconciliation.
+- Add `Outbox.prepare_mail`, identity-only `SendJob`, replay jobs/tasks and
+  `DeliveryEvents` to correlate provider events and update recipient lifecycle
+  state transactionally. Normalize receipt message IDs for indexed replay.
+- Verify concurrent sends and event projection on PostgreSQL as well as SQLite;
+  include process termination, partial outcomes and post-acceptance persistence
+  failures. The inbox uses the shared ledger with preserved historical records.
+
 - Authenticate SMTP envelope sender/recipient with the Worker's v2 HMAC format,
   persist trusted metadata before routing, and expose `Envelope.for(inbound_email)`.
   Preserve raw MIME and scope duplicate detection to the exact SMTP recipient.

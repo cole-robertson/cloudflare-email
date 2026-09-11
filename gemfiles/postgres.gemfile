@@ -1,0 +1,3 @@
+# Optional PostgreSQL concurrency verification; not a runtime dependency.
+eval_gemfile File.expand_path("../Gemfile", __dir__)
+gem "pg", "~> 1.6"

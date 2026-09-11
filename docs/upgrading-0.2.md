@@ -58,6 +58,14 @@ Responses and notifications expose `message_id` when present and `suppressed_rec
 
 Add a dedicated Queue, Email Sending event subscription, and HTTP pull consumer to use [delivery events](delivery-events.md). Existing applications are not subscribed or polled automatically. Provide an idempotent handler and configure retries/dead-letter handling.
 
+For durable sending, install the optional [outbox](outbox.md) migrations and use
+its saved-operation API. Ordinary `deliver_now`/`deliver_later` do not silently
+opt into durable claims. Existing receipt tables from the earlier preproduction
+adapter should normalize their stored `message_id` column before filtered replay;
+retain the raw payload. The reference inbox's migration imports its existing
+attempts, recipients and audits without clearing uncertainty. Outbox and tracking
+generators now refuse destructive rollback; plan forward fixes and backups.
+
 The old README's signed-reply identity and exactly-once claims were too strong. The unused signed-ID helper has been removed. A repeated Message-ID is not a send idempotency key. Live testing confirmed Cloudflare replaces custom IDs: store provider IDs and include parent IDs in outgoing reply headers. See [thread correlation](thread-correlation.md).
 
 ## Verification before publishing/deploying

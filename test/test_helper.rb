@@ -1,4 +1,5 @@
-$LOAD_PATH.unshift File.expand_path("../lib", __dir__)
+gem_root = ENV.fetch("CLOUDFLARE_EMAIL_TEST_GEM_ROOT", File.expand_path("..", __dir__))
+$LOAD_PATH.unshift File.join(gem_root, "lib")
 
 require "minitest/autorun"
 require "webmock/minitest"
