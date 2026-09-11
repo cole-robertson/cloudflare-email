@@ -18,6 +18,19 @@ module Cloudflare
         app.middleware.insert_before 0, DevIngressGuard if Rails.env.development?
       end
 
+      config.to_prepare do
+        if (defined?(Cloudflare::Email::Tenancy) && Cloudflare::Email::Tenancy.enabled?) ||
+            (defined?(Cloudflare::Email::Mailboxes) && Cloudflare::Email::Mailboxes.enabled?)
+          require "cloudflare/email/tenant_job_context"
+          Cloudflare::Email::TenantJobContext.install_framework_jobs!
+        end
+        if defined?(Cloudflare::Email::Mailboxes) && Cloudflare::Email::Mailboxes.enabled? && defined?(::ActionMailbox::Engine)
+          require "cloudflare/email/mailboxes/inbound_retention"
+          ::ActionMailbox::InboundEmail.prepend(Cloudflare::Email::Mailboxes::InboundRetention) unless
+            ::ActionMailbox::InboundEmail.ancestors.include?(Cloudflare::Email::Mailboxes::InboundRetention)
+        end
+      end
+
       config.before_initialize do
         unless defined?(::ActionMailbox::Engine)
           Rails.autoloaders.main.ignore(

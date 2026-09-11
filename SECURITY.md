@@ -34,6 +34,14 @@ Do not place secrets or private message data in public issues.
 - Database administrators and direct SQL writes are trusted. ActiveRecord
   read-only evidence fields do not provide tamper-proof storage. Keep tenant
   authorization around outbox operations and receipt access in the application.
+- The optional mailbox session scopes tenant and mailbox access, but does not
+  authenticate users. Keep domain registration/activation administrative, verify
+  ownership externally, and use your access resolver to choose tenant keys.
+  Ingress selects a registered tenant only after full signature verification.
+  Raw ActiveRecord access remains privileged, especially in shared-database mode.
+  Private tenant storage, consistent migrations and trusted job payloads are
+  required. Drain old framework jobs before enabling database tenancy; jobs
+  without the new tenant metadata are rejected rather than guessing a tenant.
 - Development tunnels expose the ingress to the internet. Use the bundled task,
   dedicated development mail routes and test data; stop tunnels when finished.
   The Host guard restricts routing but is not a sandbox for the development app

@@ -15,6 +15,8 @@ Version **0.2.0** (release candidate). Ruby 3.2+, Rails 7.2–8.1; Ruby 4.0 is t
 | [Features at a glance](docs/features.md) | Everything the gem handles, and what your app supplies |
 | [Getting started](docs/getting-started.md) | Install, send your first email, receive replies, and save reliable send operations |
 | [Troubleshooting](docs/troubleshooting.md) | What to check when mail or delivery updates do not arrive |
+| [Managed mailboxes](docs/mailboxes.md) | Create inboxes and aliases, read/archive mail, and send from a mailbox |
+| [SQLite tenant databases](docs/activerecord-tenanted.md) | Give each organization its own SQLite database with `activerecord-tenanted` |
 | [Durable outbox](docs/outbox.md) | Detailed setup, callbacks, retries, and recovery |
 | [Delivery events](docs/delivery-events.md) | Cloudflare Queue setup and recipient status tracking |
 | [Upgrading to 0.2](docs/upgrading-0.2.md) | Changes needed for an existing installation |
@@ -77,6 +79,34 @@ WelcomeMailer.welcome(user).deliver_later
 ```
 
 Multipart, attachments, cc/bcc, and threading headers are serialized through `send_raw`. Cloudflare still controls final delivery and header acceptance.
+
+## Managed mailboxes and optional tenancy
+
+Create mailboxes in code with the optional mailbox module. It includes named
+mailboxes, aliases, ownership references, read/archive state, retained raw mail,
+mailbox-authorized sends, and tenant-aware delivery-event recovery:
+
+```sh
+bin/rails generate cloudflare:email:mailboxes
+bin/rails db:migrate
+```
+
+After registering and verifying a receiving domain:
+
+```ruby
+Cloudflare::Email::Mailboxes.for_tenant("organization-123") do |inboxes|
+  mailbox = inboxes.create(name: "Support", address: "support@acme.example.com",
+    owner_ref: "team:42")
+  # Provision and activate its address route before receiving or sending mail.
+end
+```
+
+Use one database or an application-provided tenant base class. The optional
+`activerecord-tenanted` integration is tested with separate SQLite databases,
+including jobs and overlapping record IDs. Your app still authorizes users and
+provides the UI. Start with [the mailbox guide](docs/mailboxes.md), and configure
+[tenant connections](docs/activerecord-tenanted.md) before loading models when
+using separate databases. Plain Ruby users do not load this module.
 
 ## Durable mailbox delivery from Rails
 

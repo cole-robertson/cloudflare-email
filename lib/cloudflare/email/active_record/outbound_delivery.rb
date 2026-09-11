@@ -1,7 +1,9 @@
+require "cloudflare/email/active_record/base"
+
 module Cloudflare
   module Email
     module ActiveRecord
-      class OutboundDelivery < ::ActiveRecord::Base
+      class OutboundDelivery < Base
         self.table_name = "cloudflare_email_outbound_deliveries"
         has_many :outbound_recipients, class_name: "Cloudflare::Email::ActiveRecord::OutboundRecipient", dependent: :restrict_with_exception
         has_many :outbound_reconciliations, class_name: "Cloudflare::Email::ActiveRecord::OutboundReconciliation", dependent: :restrict_with_exception
