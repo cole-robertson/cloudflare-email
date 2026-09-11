@@ -2,7 +2,7 @@
 
 Ruby client for [Cloudflare Email Service](https://developers.cloudflare.com/email-service/), with ActionMailer, authenticated ActionMailbox ingress, a forwarding Worker, and optional durable Rails sending and delivery-event tracking.
 
-Version **0.2.0** (release candidate). Ruby 3.2+, Rails 7.2–8.1; Ruby 4.0 is tested with Rails 8.1. Supported test floors are Rails 7.2.3.2, 8.0.5.1, and 8.1.3.1. Prefer a maintained Ruby/Rails release for new applications. The plain Ruby client uses Ruby's standard libraries plus the Base64 gem. Node is optional: Worker deployment also works through the included Ruby deployer. See [security guidance](SECURITY.md) for deployment responsibilities.
+Version **0.2.0**. Ruby 3.2+, Rails 7.2–8.1; Ruby 4.0 is tested with Rails 8.1. Supported test floors are Rails 7.2.3.2, 8.0.5.1, and 8.1.3.1. Prefer a maintained Ruby/Rails release for new applications. The plain Ruby client uses Ruby's standard libraries plus the Base64 gem. Node is optional: Worker deployment also works through the included Ruby deployer. See [security guidance](SECURITY.md) for deployment responsibilities.
 
 ## Start here
 
@@ -25,12 +25,10 @@ The sections below are the configuration and API reference.
 
 ## Install and send from Rails
 
-Until 0.2.0 is published, add the reviewed security release-candidate commit to your Gemfile. RubyGems still serves 0.1.0, which does not include the features described here:
+Add version 0.2 to your Gemfile. Existing 0.1 users should follow the [upgrade guide](docs/upgrading-0.2.md), including the coordinated Rails/Worker update:
 
 ```ruby
-gem "cloudflare-email",
-  git: "https://github.com/cole-robertson/cloudflare-email.git",
-  ref: "4273c5ac10cb87d5e5610acc6a4e69c55d94a42f"
+gem "cloudflare-email", "~> 0.2.0"
 ```
 
 ```sh
@@ -81,6 +79,19 @@ WelcomeMailer.welcome(user).deliver_later
 Multipart, attachments, cc/bcc, and threading headers are serialized through `send_raw`. Cloudflare still controls final delivery and header acceptance.
 
 ## Managed mailboxes and optional tenancy
+
+**Multi-tenancy is off by default.** Installing the gem does not create tenant
+databases, install a tenancy library, or change your application's database routing.
+
+| Setup | What you explicitly enable |
+| --- | --- |
+| Plain Ruby sending | Nothing extra; no Rails/database required |
+| Managed mailboxes in one database | Run the mailbox generator and load the optional module |
+| Separate tenant databases | Configure `Tenancy.configure(...)` with your application's base class and switching adapter before loading models |
+
+The mailbox API uses a tenant key to group and scope records even in one database.
+That key alone does not enable database switching. `activerecord-tenanted` is an
+optional application dependency, not a runtime dependency of this gem.
 
 Create mailboxes in code with the optional mailbox module. It includes named
 mailboxes, aliases, ownership references, read/archive state, retained raw mail,

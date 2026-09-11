@@ -5,8 +5,13 @@ mail into them, track read/archive state, and send through the durable outbox.
 It works in one SQLite database or with a separate database per organization.
 It supplies models and services; your app supplies permissions and the UI.
 
-This module is new unreleased code. Use a reviewed commit containing this module,
-not the published 0.1.0 gem or the earlier security-only 0.2 commit.
+This module is available in version 0.2.0. Install `gem "cloudflare-email", "~> 0.2.0"`.
+
+**Database multi-tenancy is off by default.** The mailbox generator works with
+one ordinary database. Calling `for_tenant` groups and scopes mailbox records;
+it does not create databases or install a tenant adapter. Separate databases
+require explicit `Tenancy.configure(...)` before models load. Neither Rails nor
+`activerecord-tenanted` is added to plain Ruby applications by this module.
 
 ## Install
 

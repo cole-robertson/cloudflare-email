@@ -1,8 +1,8 @@
 # Security
 
-The current hardening work targets the unreleased 0.2.0 branch. The published
-0.1.0 gem does not include it. Use a reviewed commit containing the fixes until
-a release is published, and redeploy the bundled Worker when upgrading.
+The hardening described here is included in 0.2.0. Version 0.1.0 does not include
+these fixes. Upgrade Rails and the bundled Worker together using the
+[upgrade guide](docs/upgrading-0.2.md).
 
 Rails integration is tested on patched Rails 7.2, 8.0, and 8.1; application
 owners must update their own Rails, database adapter, and other dependencies.

@@ -2,6 +2,9 @@
 
 Use this setup when each organization has its own SQLite database. The shared database holds receiving domains and delivery-event routing. Mailboxes, messages, and the outbox live in the organization's database.
 
+This setup is entirely opt-in. Skip this guide for a single database: installing
+the gem or running the mailbox generator does not enable database tenancy.
+
 `activerecord-tenanted` is an optional application dependency. The gem's integration test uses version 0.8 on Rails 8.1; you do not need it for a single database or another tenant adapter.
 
 ## 1. Configure your databases

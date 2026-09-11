@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0 — Unreleased
+## 0.2.0 — 2026-09-11
 
 - Add optional managed mailboxes: domain directory, addresses/aliases, lifecycle,
   incoming memberships, read/archive/purge APIs and raw-mail retention.

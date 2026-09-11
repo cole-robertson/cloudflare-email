@@ -18,13 +18,11 @@ not need to be the same domain as your Rails application's web address.
 
 ### Install the current code
 
-The new features are in the unreleased 0.2.0 code. RubyGems currently serves
-0.1.0. Add this reviewed commit to your app's `Gemfile`:
+Add version 0.2 to your app's `Gemfile`. If upgrading from 0.1, read the
+[upgrade guide](upgrading-0.2.md) before changing an existing Worker deployment:
 
 ```ruby
-gem "cloudflare-email",
-  git: "https://github.com/cole-robertson/cloudflare-email.git",
-  ref: "4273c5ac10cb87d5e5610acc6a4e69c55d94a42f"
+gem "cloudflare-email", "~> 0.2.0"
 ```
 
 ```sh
