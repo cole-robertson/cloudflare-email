@@ -19,6 +19,20 @@ class VerificationEdgeCasesTest < Minitest::Test
     )
   end
 
+  def test_header_preflight_requires_bounded_well_formed_fields
+    options = { secret: SECRET, timestamp: "1750000000", signature: "a" * 64,
+      version: "2", envelope: ENVELOPE, now: 1_750_000_000 }
+    # Preflight does not claim authentication: a well-formed signature still
+    # must be checked against the body by verify.
+    assert_equal :ok, Cloudflare::Email::Verification.verify_headers(**options)
+    [{ signature: nil }, { signature: "short" }, { signature: "A" * 64 },
+      { timestamp: "1" * 21 }, { timestamp: " 1750000000" },
+      { version: nil }, { envelope: "invalid" }].each do |invalid|
+      assert_equal :bad_signature, Cloudflare::Email::Verification.verify_headers(**options.merge(invalid))
+    end
+    assert_equal :stale, Cloudflare::Email::Verification.verify_headers(**options.merge(timestamp: "1"))
+  end
+
   def test_unicode_body
     body = "Café résumé 日本語 🔥"
     ts = "1750000000"

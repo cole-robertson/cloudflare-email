@@ -44,10 +44,55 @@ function validAddress(address, allowEmpty = false) {
     domain.split(".").every(label => /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/.test(label));
 }
 
+function validIngressUrl(value) {
+  try {
+    const url = new URL(value);
+    const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+    return !url.username && !url.password && !url.hash &&
+      (url.protocol === "https:" || (url.protocol === "http:" && loopback));
+  } catch { return false; }
+}
+
+async function readBounded(stream, limit) {
+  const reader = stream.getReader();
+  const chunks = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > limit) {
+        await reader.cancel();
+        throw new Error("message exceeds size limit");
+      }
+      chunks.push(value);
+    }
+  } finally { reader.releaseLock(); }
+  const raw = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) { raw.set(chunk, offset); offset += chunk.byteLength; }
+  return raw;
+}
+
 export default {
   async email(message, env) {
     if (!env.RAILS_INGRESS_URL || !env.INGRESS_SECRET) {
       message.setReject("worker missing RAILS_INGRESS_URL or INGRESS_SECRET");
+      return;
+    }
+
+    if (!validIngressUrl(env.RAILS_INGRESS_URL)) {
+      message.setReject("worker requires an HTTPS ingress URL (HTTP allowed only for loopback)");
+      return;
+    }
+    const limit = env.MAX_EMAIL_BYTES === undefined ? 25 * 1024 * 1024 : Number(env.MAX_EMAIL_BYTES);
+    if (!Number.isSafeInteger(limit) || limit <= 0) {
+      message.setReject("worker MAX_EMAIL_BYTES must be a positive integer");
+      return;
+    }
+    if (message.rawSize > limit) {
+      message.setReject("message exceeds size limit");
       return;
     }
 
@@ -59,7 +104,13 @@ export default {
     const envelope = btoa(JSON.stringify({ from: message.from, to: message.to }))
       .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 
-    const raw = new Uint8Array(await new Response(message.raw).arrayBuffer());
+    let raw;
+    try {
+      raw = await readBounded(message.raw, limit);
+    } catch {
+      message.setReject("message exceeds size limit or could not be read");
+      return;
+    }
     const ts = Math.floor(Date.now() / 1000).toString();
 
     const tsBytes = new TextEncoder().encode(`v2.${ts}.${envelope}.`);

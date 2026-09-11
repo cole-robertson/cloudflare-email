@@ -129,6 +129,9 @@ module Cloudflare
                 return
               end
 
+              require "cloudflare/email/endpoint"
+              Cloudflare::Email::Endpoint.parse(ingress_url.strip)
+
               run "npm run deploy -- --env production", abort_on_failure: true
               run_with_stdin("npx --no-install wrangler secret put RAILS_INGRESS_URL --env production", ingress_url.strip)
               run_with_stdin("npx --no-install wrangler secret put INGRESS_SECRET --env production", @ingress_secret)

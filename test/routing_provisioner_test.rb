@@ -19,6 +19,13 @@ class RoutingProvisionerTest < Minitest::Test
     end
   end
 
+  def test_rejects_insecure_remote_api_endpoint_before_sending_credentials
+    assert_raises(Cloudflare::Email::ConfigurationError) do
+      Cloudflare::Email::RoutingProvisioner.new(api_token: TOKEN, api_base: "http://api.example.test/client/v4")
+    end
+    assert_not_requested :any, %r{api.example.test}
+  end
+
   def test_expand_parent_domains
     p = make
     assert_equal ["a.b.example.com", "b.example.com", "example.com"],

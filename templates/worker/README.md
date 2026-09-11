@@ -22,6 +22,16 @@ for each environment you use. For local development, run
 `npm run dev -- --env development`, with secrets in `.dev.vars.development`.
 Never put secrets into `wrangler.toml` or version control.
 
+The Worker refuses non-HTTPS destinations, URL credentials, and fragments.
+HTTP is allowed only for `localhost`, `127.0.0.1`, or `[::1]` local verification.
+The Worker and Rails ingress each default to a 25 MiB MIME size limit. Set
+`MAX_EMAIL_BYTES` to the same positive integer in both environments to change
+that limit. Both check actual body bytes; declared sizes alone are not trusted.
+Rails returns HTTP 413 for oversized mail and rejects malformed or stale signing
+headers before reading the body. Configure request size/rate limits and read
+timeouts at your reverse proxy as well: application limits do not bound earlier
+server buffering or the time spent receiving an HTTP request.
+
 Then in the Cloudflare dashboard:
 
 1. **Email Routing → Routes**

@@ -157,6 +157,7 @@ class RailsAppTest < Minitest::Test
         WebMock.reset!
         tunnel = Cloudflare::Email::DevTunnel.new(port: 3456, io: StringIO.new)
         tunnel.define_singleton_method(:system) { |*| true }
+        tunnel.define_singleton_method(:verify_ingress_guard!) { true }
         tunnel.define_singleton_method(:spawn) { |*, **| 12345 }
         tunnel.define_singleton_method(:wait_for_tunnel_url) do
           raise "Tunnel discovery timed out" if failure == :discovery
@@ -213,6 +214,34 @@ class RailsAppTest < Minitest::Test
       assert_equal observed, Cloudflare::Email::Envelope.for(inbound.reload)
       assert_equal body, inbound.raw_email.download
       assert_equal ["unrelated@example.com"], inbound.mail.to
+    end
+
+    def test_ingress_enforces_configured_mime_limit
+      previous = ENV["MAX_EMAIL_BYTES"]
+      body = "From: sender@example.com\r\nTo: receiver@example.com\r\nMessage-ID: <size-limit@example.com>\r\n\r\nBody\r\n"
+      ENV["MAX_EMAIL_BYTES"] = (body.bytesize - 1).to_s
+      before = ActionMailbox::InboundEmail.count
+      signed_post(body)
+      assert_equal 413, last_response.status
+      assert_equal before, ActionMailbox::InboundEmail.count
+      ENV["MAX_EMAIL_BYTES"] = body.bytesize.to_s
+      signed_post(body)
+      assert_equal 200, last_response.status
+      assert_equal before + 1, ActionMailbox::InboundEmail.count
+    ensure
+      ENV["MAX_EMAIL_BYTES"] = previous
+    end
+
+    def test_ingress_bounds_body_reads_even_without_content_length
+      previous = ENV["MAX_EMAIL_BYTES"]
+      ENV["MAX_EMAIL_BYTES"] = "16"
+      stream = StringIO.new("example MIME body bytes")
+      controller = Cloudflare::Email::IngressController.new
+      controller.define_singleton_method(:request) { Struct.new(:body).new(stream) }
+      assert_equal 17, controller.send(:raw_body).bytesize
+      assert_equal 17, stream.pos
+    ensure
+      ENV["MAX_EMAIL_BYTES"] = previous
     end
 
     def test_v2_deduplication_is_scoped_to_exact_smtp_recipient
@@ -327,7 +356,7 @@ class RailsAppTest < Minitest::Test
     arguments = nil
     tunnel.define_singleton_method(:spawn) { |*args, **_options| arguments = args; nil }
     tunnel.send(:start_tunnel)
-    assert_equal ["cloudflared", "tunnel", "--url", "http://127.0.0.1:3456", "--http-host-header", "localhost"], arguments
+    assert_equal ["cloudflared", "tunnel", "--url", "http://127.0.0.1:3456", "--http-host-header", Cloudflare::Email::DevIngressGuard::HOST], arguments
   ensure
     tunnel&.send(:cleanup)
   end

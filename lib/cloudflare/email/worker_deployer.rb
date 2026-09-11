@@ -1,6 +1,7 @@
 require "net/http"
 require "json"
 require "securerandom"
+require "cloudflare/email/endpoint"
 
 module Cloudflare
   module Email
@@ -49,7 +50,7 @@ module Cloudflare
         @api_token          = api_token
         @script_name        = script_name
         @compatibility_date = compatibility_date
-        @api_base           = api_base
+        @api_base           = Endpoint.parse(api_base).to_s.delete_suffix("/")
       end
 
       # Uploads/updates the Worker script. Accepts either `script_path:` (a
@@ -71,6 +72,7 @@ module Cloudflare
 
       # Set/update a Worker secret.
       def put_secret(name, value)
+        Endpoint.parse(value) if name.to_s == "RAILS_INGRESS_URL"
         request(
           method: :put,
           path:   "/accounts/#{@account_id}/workers/scripts/#{@script_name}/secrets",

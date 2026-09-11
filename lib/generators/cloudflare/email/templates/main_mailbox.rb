@@ -6,13 +6,8 @@
 # ActionMailbox API (mail is a Mail::Message, inbound_email is the AR record).
 class MainMailbox < ApplicationMailbox
   def process
-    Rails.logger.info(
-      "[cloudflare-email] inbound received: " \
-      "from=#{mail.from&.first.inspect} " \
-      "to=#{Array(mail.to).inspect} " \
-      "subject=#{mail.subject.inspect} " \
-      "message_id=#{mail.message_id.inspect}"
-    )
+    # Keep message content and personal addresses out of application logs.
+    Rails.logger.info("[cloudflare-email] inbound received: inbound_email_id=#{inbound_email.id}")
 
     # Example ways to pull content out of the incoming message:
     #

@@ -2,6 +2,15 @@
 
 ## 0.2.0 — Unreleased
 
+- Bound Rails and Worker inbound reads to 25 MiB by default; reject malformed or
+  stale signing headers before reading MIME. Require HTTPS remote endpoints.
+- Restrict the development tunnel to email ingress and require a running guard;
+  redact client inspection, retry logs, and generated mailbox logging.
+- Validate delivery-event schemas, preserve receipt evidence through ordinary
+  ActiveRecord updates, and tighten provider acceptance response handling.
+- Remove Rails 7.1 support, update patched Rails/SQLite test floors, and audit
+  resolved Ruby dependencies in CI. See the dated security verification report.
+
 - Add an optional durable Rails outbox: immutable MIME/envelope snapshots,
   account-scoped operation keys, committed send claims, per-recipient acceptance
   evidence, blocked uncertain retries, and audited subset reconciliation.

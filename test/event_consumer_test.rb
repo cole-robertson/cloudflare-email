@@ -17,8 +17,8 @@ class EventConsumerTest < Minitest::Test
     {
       "type" => "cf.email.sending.message.delivered",
       "source" => { "type" => "email.sending", "domain" => "send.example.com" },
-      "payload" => { "eventId" => "event-123", "messageId" => "message-456", "terminal" => true },
-      "metadata" => { "accountId" => ACCOUNT_ID, "eventSchemaVersion" => 1 },
+      "payload" => { "eventId" => "event-123", "messageId" => "message-456", "terminal" => true, "recipient" => "user@example.net" },
+      "metadata" => { "accountId" => ACCOUNT_ID, "eventSchemaVersion" => 1, "eventTimestamp" => "2026-06-01T02:48:57Z" },
     }
   end
 
@@ -144,6 +144,14 @@ class EventConsumerTest < Minitest::Test
     assert_raises(Cloudflare::Email::Error) { @consumer.poll { handled += 1 } }
     assert_equal 1, handled
     assert_requested ack, times: 1
+  end
+
+  def test_malformed_event_schema_never_reaches_handler_or_ack
+    raw = event_data
+    raw["payload"]["terminal"] = "true"
+    stub_pull([queue_message(raw)])
+    assert_raises(Cloudflare::Email::ValidationError) { @consumer.poll { flunk "invalid schema yielded" } }
+    assert_not_requested :post, endpoint("ack")
   end
 
   def test_successful_http_response_with_no_acknowledged_message_is_failure

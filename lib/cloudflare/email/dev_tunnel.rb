@@ -1,5 +1,6 @@
 require "cloudflare/email/worker_deployer"
 require "tempfile"
+require "cloudflare/email/dev_ingress_guard"
 
 module Cloudflare
   module Email
@@ -14,6 +15,7 @@ module Cloudflare
       end
 
       def initialize(port:, io: $stdout)
+        raise ArgumentError, "port must be between 1 and 65535" unless port.is_a?(Integer) && (1..65_535).cover?(port)
         @port       = port
         @io         = io
         @tunnel_pid = nil
@@ -64,11 +66,25 @@ module Cloudflare
           raise "cloudflared not found in PATH — install from https://developers.cloudflare.com/cloudflared/"
         end
         require "cloudflare/email/credentials"
-        if Cloudflare::Email::Credentials.account_id.empty? ||
-           Cloudflare::Email::Credentials.management_token.empty?
+        if Cloudflare::Email::Credentials.account_id.to_s.empty? ||
+           Cloudflare::Email::Credentials.management_token.to_s.empty?
           raise "Missing cloudflare.account_id or cloudflare.api_token in credentials " \
                 "(or CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_API_TOKEN env vars)"
         end
+        verify_ingress_guard!
+      end
+
+      def verify_ingress_guard!
+        http = Net::HTTP.new("127.0.0.1", @port, nil)
+        http.open_timeout = http.read_timeout = 2
+        request = Net::HTTP::Get.new("/")
+        request["Host"] = DevIngressGuard::HOST
+        response = http.request(request)
+        unless response.code == "404" && response[DevIngressGuard::RESPONSE_HEADER] == "1"
+          raise "Restart the development Rails server with the ingress-only middleware before opening a tunnel"
+        end
+      rescue SystemCallError, IOError, Timeout::Error
+        raise "Start the development Rails server with the ingress-only middleware before opening a tunnel"
       end
 
       def start_tunnel
@@ -76,7 +92,7 @@ module Cloudflare
         @tunnel_log = Tempfile.new(["cloudflare-email-dev-tunnel", ".log"])
         @tunnel_pid = spawn(
           "cloudflared", "tunnel", "--url", "http://127.0.0.1:#{@port}",
-          "--http-host-header", "localhost",
+          "--http-host-header", DevIngressGuard::HOST,
           out: @tunnel_log, err: @tunnel_log,
         )
       end
