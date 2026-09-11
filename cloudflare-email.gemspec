@@ -44,7 +44,7 @@ Gem::Specification.new do |spec|
   # Base64 is a bundled rather than default gem on recent Ruby versions.
   spec.add_dependency "base64", ">= 0.2", "< 1.0"
 
-  spec.add_development_dependency "minitest", "~> 5.20"
+  spec.add_development_dependency "minitest", "~> 6.0"
   spec.add_development_dependency "rake", "~> 13.0"
   spec.add_development_dependency "webmock", "~> 3.20"
   spec.add_development_dependency "rails", ">= 7.2.3.2", "< 9.0"
