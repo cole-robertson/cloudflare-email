@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Add a bounded, Rails-independent `Ingress.verify` API for existing ingestion
+  pipelines, with optional ActionMailbox persistence and tenant registry routing.
+- Add opt-in v3 signatures for provider metadata supplied by custom Workers.
+  Metadata is authenticated transport evidence, not proof of sender authenticity.
+  Default Worker forwarding remains v2; upgrade Rails before enabling v3.
+- Verify signatures against exact timestamp header bytes; decimal parsing is
+  used only for freshness. The bundled Worker's timestamp format is unchanged.
+- Add GET-only `cloudflare:email:check_route` diagnostics for exact receiving-domain
+  DNS and Worker routing. Reports uncertainty without changing configuration or
+  claiming live delivery is verified.
+
 - Add an opt-in server-rendered mailbox management engine with host authentication,
   mailbox/domain scoping and per-action permissions. Manage mailboxes and aliases,
   suspend/resume, preview plain-text messages and mark read/archive without

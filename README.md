@@ -17,6 +17,8 @@ Version **0.2.0**. Ruby 3.2+, Rails 7.2–8.1; Ruby 4.0 is tested with Rails 8.1
 | [Troubleshooting](docs/troubleshooting.md) | What to check when mail or delivery updates do not arrive |
 | [Managed mailboxes](docs/mailboxes.md) | Create inboxes and aliases, read/archive mail, and send from a mailbox |
 | [Management engine (unreleased)](docs/management-engine.md) | Mount an optional server-rendered mailbox UI using your app's authentication |
+| [Custom ingress (unreleased)](docs/custom-ingress.md) | Reuse authentication, signed metadata, and tenant routing in your existing ingestion pipeline |
+| [Routing diagnostics (unreleased)](docs/routing-diagnostics.md) | Inspect exact-domain DNS and Worker routes without changing infrastructure |
 | [SQLite tenant databases](docs/activerecord-tenanted.md) | Give each organization its own SQLite database with `activerecord-tenanted` |
 | [Durable outbox](docs/outbox.md) | Detailed setup, callbacks, retries, and recovery |
 | [Delivery events](docs/delivery-events.md) | Cloudflare Queue setup and recipient status tracking |
@@ -229,7 +231,7 @@ end
 
 `Cloudflare::Email::Envelope.for(inbound_email)` returns a string-keyed `{"from" => "sender@example.com", "to" => "support@example.com"}` hash, or `nil` when the record has no authenticated envelope (for example, another ingress). The metadata is stored on the raw-email blob before routing jobs enqueue. It does not modify the MIME source. Envelope sender information records the SMTP reverse path; it does not authenticate the human sender. An empty `from` is valid for bounces.
 
-Version 0.2 requires the bundled v2 Worker; missing or v1 signatures are rejected. Coordinate Rails and Worker deployment while ingress is paused. The Worker requires ASCII dot-atom addresses, at most 254 bytes with a 64-byte local part. Quoted local parts, address literals, and internationalized addresses are not supported by this envelope format.
+The bundled Worker uses v2 signatures by default; missing or v1 signatures are rejected. The unreleased custom-ingress API also supports opt-in v3 signatures carrying authenticated Worker metadata. See [custom ingestion](docs/custom-ingress.md) and upgrade the Rails receiver before enabling v3 in a custom Worker. When upgrading from v1, coordinate Rails and Worker deployment while ingress is paused. Both envelope versions require ASCII dot-atom addresses, at most 254 bytes with a 64-byte local part. Quoted local parts, address literals, and internationalized addresses are not supported by this envelope format.
 
 Successful ingress storage returns HTTP 200; duplicate storage returns 200 too. The timestamp window limits request age, but is not a one-time replay ledger. Version 2 deduplication includes the exact SMTP recipient, so identical MIME delivered to separate To/Cc/Bcc recipients creates separate inbound records while a retry for the same recipient creates none.
 

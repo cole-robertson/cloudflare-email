@@ -74,13 +74,17 @@ class VerificationEdgeCasesTest < Minitest::Test
     # Integer("0100", 10) is fine, but "0x1" would fail — we pass base 10 strictly.
     body = "hello"
     ts = "0100"
-    sig = sign("100", body)
-    # "0100" parses as 100 in base 10, so this is actually accepted if fresh
+    sig = sign(ts, body)
+    # Freshness uses decimal 100; authentication retains the exact header bytes.
     result = Cloudflare::Email::Verification.verify(
       version: "2", envelope: ENVELOPE,
       secret: SECRET, body: body, timestamp: ts, signature: sig, now: 100,
     )
     assert_equal :ok, result
+    assert_equal :bad_signature, Cloudflare::Email::Verification.verify(
+      version: "2", envelope: ENVELOPE,
+      secret: SECRET, body: body, timestamp: ts, signature: sign("100", body), now: 100,
+    )
   end
 
   def test_hex_timestamp_rejected

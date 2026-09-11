@@ -45,11 +45,11 @@ module Cloudflare
         nil
       end
 
-      # Only metadata written after v2 verification is trusted. MIME headers
+      # Only metadata written after v2/v3 verification is trusted. MIME headers
       # (including X-CF-* headers) never participate in this lookup.
       def self.for(inbound_email)
         metadata = inbound_email.raw_email.blob&.metadata&.fetch(METADATA_KEY, nil)
-        return nil unless metadata.is_a?(Hash) && metadata["version"] == 2
+        return nil unless metadata.is_a?(Hash) && [2, 3].include?(metadata["version"])
         value = metadata.reject { |key, _| key == "version" }
         valid?(value) ? value : nil
       end
