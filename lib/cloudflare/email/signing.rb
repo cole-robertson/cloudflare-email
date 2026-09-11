@@ -4,8 +4,8 @@ require "openssl"
 module Cloudflare
   module Email
     # Shared cryptographic helpers: HMAC-SHA256, constant-time compare,
-    # base64url encoding. Used by Verification (ingress HMAC) and
-    # SecureMessageId (signed Message-IDs). Keeps every crypto primitive in
+    # base64url encoding. Used by Verification and authenticated envelopes.
+    # Keeps every crypto primitive in
     # one place so the hash algorithm, encoding choice, and compare function
     # can't drift between call sites.
     module Signing

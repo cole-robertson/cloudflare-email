@@ -13,7 +13,7 @@ module Cloudflare
     #   X-CF-Email-Signature: <hex digest>
     #   X-CF-Email-Signature-Version: 2
     #   X-CF-Email-Envelope: <unpadded base64url JSON from/to>
-    # Missing/version 1 signs "{timestamp}.{raw_body}" and trusts no envelope.
+    # The version and authenticated SMTP envelope are required.
     module Verification
       DEFAULT_WINDOW = 5 * 60 # seconds
 
@@ -21,8 +21,7 @@ module Cloudflare
       # Returns :bad_signature for any malformed input.
       def self.verify(secret:, body:, timestamp:, signature:, version: nil, envelope: nil, window: DEFAULT_WINDOW, now: Time.now.to_i)
         return :bad_signature if blank?(secret) || blank?(body) || blank?(timestamp) || blank?(signature)
-        return :bad_signature unless [nil, "1", "2"].include?(version)
-        return :bad_signature if version == "2" && !Envelope.decode(envelope)
+        return :bad_signature unless version == "2" && Envelope.decode(envelope)
 
         ts = begin
           Integer(timestamp.to_s, 10)
@@ -38,9 +37,10 @@ module Cloudflare
         :ok
       end
 
-      def self.sign(secret:, body:, timestamp:, version: nil, envelope: nil)
-        raise ArgumentError, "unsupported signature version" unless [nil, "1", "2"].include?(version)
-        prefix = version == "2" ? "v2.#{timestamp}.#{envelope}." : "#{timestamp}."
+      def self.sign(secret:, body:, timestamp:, envelope:, version: "2")
+        raise ArgumentError, "unsupported signature version" unless version == "2"
+        raise ArgumentError, "invalid SMTP envelope" unless Envelope.decode(envelope)
+        prefix = "v2.#{timestamp}.#{envelope}."
         Signing.hmac_hex(secret, prefix.b + body.b)
       end
 

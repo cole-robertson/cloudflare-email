@@ -5,7 +5,7 @@ require "cloudflare/email/signing"
 require "cloudflare/email/envelope"
 require "cloudflare/email/credentials"
 require "cloudflare/email/client"
-require "cloudflare/email/secure_message_id"
+require "cloudflare/email/message_id"
 require "cloudflare/email/delivery_event"
 require "cloudflare/email/event_consumer"
 

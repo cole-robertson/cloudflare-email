@@ -78,7 +78,7 @@ Dir.mktmpdir("cloudflare-email-upgrade-") do |temporary|
   context.call.migrate
   check.call(connection.select_value("SELECT COUNT(*) FROM delivery_attempts") == 1, "migrating restored current schema is idempotent")
 
-  # Exercise real Rails ingress and mailbox routing with old/new Worker protocols.
+  # Exercise strict v2 ingress and mailbox routing, rejecting old Worker traffic.
   # Closed conversation avoids all LLM calls and outbound delivery.
   require "rack/mock"
   require "cloudflare/email/verification"
@@ -95,28 +95,35 @@ Dir.mktmpdir("cloudflare-email-upgrade-") do |temporary|
   end
   check.call(blocked && DeliveryAttempt.count == 1, "restored ambiguous send remains blocked without creating another attempt")
   request = Rack::MockRequest.new(Rails.application)
-  deliver = lambda do |name, version:, legacy:, cc: false|
-    ENV["ALLOW_LEGACY_EMAIL_ROUTING"] = legacy ? "true" : "false"
+  deliver = lambda do |name, version:, cc: false|
     body = "From: sender@example.test\r\nTo: inbox@example.test\r\n"
     body += "Cc: cc@example.test\r\n" if cc
     body += "Message-ID: <#{name}@example.test>\r\nIn-Reply-To: <legacy-incoming@example.test>\r\nSubject: Re: Upgrade\r\n\r\nSynthetic rollout message\r\n"
     timestamp = Time.now.to_i.to_s
-    envelope = version ? Cloudflare::Email::Envelope.encode(from: "sender@example.test", to: "inbox@example.test") : nil
-    signature = Cloudflare::Email::Verification.sign(secret: ENV.fetch("CLOUDFLARE_INGRESS_SECRET"), body: body, timestamp: timestamp, version: version, envelope: envelope)
+    envelope = Cloudflare::Email::Envelope.encode(from: "sender@example.test", to: "inbox@example.test")
+    signature = if version == "2"
+      Cloudflare::Email::Verification.sign(secret: ENV.fetch("CLOUDFLARE_INGRESS_SECRET"), body: body, timestamp: timestamp, envelope: envelope)
+    else
+      Cloudflare::Email::Signing.hmac_hex(ENV.fetch("CLOUDFLARE_INGRESS_SECRET"), "#{timestamp}.".b + body.b)
+    end
     headers = {"CONTENT_TYPE" => "message/rfc822", "HTTP_X_CF_EMAIL_TIMESTAMP" => timestamp, "HTTP_X_CF_EMAIL_SIGNATURE" => signature}
     headers["HTTP_X_CF_EMAIL_SIGNATURE_VERSION"] = version if version
     headers["HTTP_X_CF_EMAIL_ENVELOPE"] = envelope if envelope
+    before = ActionMailbox::InboundEmail.count
     response = request.post("/rails/action_mailbox/cloudflare/inbound_emails", input: body, **headers)
+    unless version == "2"
+      next response.status == 401 && ActionMailbox::InboundEmail.count == before
+    end
     raise "Ingress failed: #{response.status}" unless response.status == 200
     inbound = ActionMailbox::InboundEmail.find_by!(message_id: "#{name}@example.test")
     inbound.route
     inbound.reload
   end
-  check.call(deliver.call("v1-transition", version: nil, legacy: true).delivered?, "Rails-first transitional mode routes old Worker single-To messages")
-  check.call(deliver.call("v1-cc", version: nil, legacy: true, cc: true).bounced?, "transitional mode refuses ambiguous legacy Cc messages")
-  check.call(deliver.call("v1-strict", version: nil, legacy: false).bounced?, "strict mode records old Worker ingress but refuses unauthenticated routing")
-  check.call(deliver.call("v2-strict", version: "2", legacy: false).delivered?, "new Worker v2 routes successfully after strict routing enabled")
-  check.call(Message.where(conversation_id: 1, role: "user").count == 3, "only the two authorized rollout messages enter the existing conversation")
+  check.call(deliver.call("missing-version", version: nil), "old Worker without a version is rejected before persistence")
+  check.call(deliver.call("v1-cc", version: "1", cc: true), "v1 Worker with Cc is rejected before persistence")
+  check.call(deliver.call("v1-strict", version: "1"), "v1 Worker with a single recipient is rejected before persistence")
+  check.call(deliver.call("v2-strict", version: "2").delivered?, "current Worker v2 routes through the authenticated envelope")
+  check.call(Message.where(conversation_id: 1, role: "user").count == 2, "only the authenticated v2 message enters the existing conversation")
   check.call(ActionMailer::Base.deliveries.empty?, "rollout rehearsal sends no outbound mail")
 
   puts JSON.pretty_generate({ruby: RUBY_VERSION, rails: Rails.version, gem: Cloudflare::Email::VERSION, checks: checks, isolation: "temporary SQLite databases and Active Storage; network disabled during routing"})

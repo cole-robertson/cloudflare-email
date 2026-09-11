@@ -17,6 +17,13 @@ module Cloudflare
         @raw["result"].is_a?(Hash) ? @raw["result"] : {}
       end
 
+      # Provider acceptance is not final delivery. A partial acceptance is true;
+      # inspect recipient outcomes before retrying any rejected recipients.
+      def accepted?
+        success? && (delivered.any? || queued.any? ||
+          (!message_id.to_s.strip.empty? && permanent_bounces.empty? && suppressed_recipients.empty?))
+      end
+
       def message_id
         result["message_id"] ||
           dig_message_id(result["delivered"]) ||

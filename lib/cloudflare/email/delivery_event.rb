@@ -1,4 +1,5 @@
 require "json"
+require "time"
 
 module Cloudflare
   module Email
@@ -38,6 +39,18 @@ module Cloudflare
       def complaint = payload["complaint"] || {}
       def rejection = payload["rejection"] || {}
       def failure = payload["failure"] || {}
+
+      # Use only after matching account, provider message ID, and recipient.
+      # Equal timestamps keep the existing state; unknown future types remain
+      # available in receipts but must not replace a recognized delivery state.
+      def supersedes?(occurred_at:, terminal:)
+        return false unless known?
+        return false if terminal && !terminal?
+
+        incoming = Time.iso8601(self.occurred_at.to_s)
+        previous = occurred_at.is_a?(Time) ? occurred_at : Time.iso8601(occurred_at.to_s) unless occurred_at.nil?
+        previous.nil? || incoming > previous
+      end
     end
   end
 end

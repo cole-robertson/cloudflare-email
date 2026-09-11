@@ -128,9 +128,9 @@ class ApplicationMailbox < ActionMailbox::Base
 end
 ```
 
-`Cloudflare::Email::Envelope.for(inbound_email)` returns a string-keyed `{"from" => "sender@example.com", "to" => "support@example.com"}` hash, or `nil` for legacy ingress. The metadata is stored on the raw-email blob before routing jobs enqueue. It does not modify the MIME source. Envelope sender information records the SMTP reverse path; it does not authenticate the human sender. An empty `from` is valid for bounces.
+`Cloudflare::Email::Envelope.for(inbound_email)` returns a string-keyed `{"from" => "sender@example.com", "to" => "support@example.com"}` hash, or `nil` when the record has no authenticated envelope (for example, another ingress). The metadata is stored on the raw-email blob before routing jobs enqueue. It does not modify the MIME source. Envelope sender information records the SMTP reverse path; it does not authenticate the human sender. An empty `from` is valid for bounces.
 
-Upgrade Rails before deploying the updated Worker. Legacy signatures remain accepted but never authenticate envelope headers, including similarly named MIME headers. The new Worker requires ASCII dot-atom addresses, at most 254 bytes with a 64-byte local part. Quoted local parts, address literals, and internationalized addresses are not supported by this envelope format.
+Version 0.2 requires the bundled v2 Worker; missing or v1 signatures are rejected. Coordinate Rails and Worker deployment while ingress is paused. The Worker requires ASCII dot-atom addresses, at most 254 bytes with a 64-byte local part. Quoted local parts, address literals, and internationalized addresses are not supported by this envelope format.
 
 Successful ingress storage returns HTTP 200; duplicate storage returns 200 too. The timestamp window limits request age, but is not a one-time replay ledger. Version 2 deduplication includes the exact SMTP recipient, so identical MIME delivered to separate To/Cc/Bcc recipients creates separate inbound records while a retry for the same recipient creates none.
 
@@ -181,11 +181,22 @@ end
 
 Each event is acknowledged only after the handler returns normally. Configure a dedicated queue, subscription, retry policy, and dead-letter queue first. See the complete [Rails and Ruby delivery-event setup](docs/delivery-events.md).
 
-## Thread correlation and signed Message-IDs
+Rails applications can run `bin/rails generate cloudflare:email:tracking` and
+`bin/rails db:migrate` to install optional durable event receipts. The adapter
+commits before ACK, deduplicates account/event IDs, retains unmatched events,
+and replays them with transactional application handlers. It requires explicit
+opt-in; the plain Ruby client stays independent of ActiveRecord.
+
+Shared helpers include `Response#accepted?` (any provider acceptance, not final
+delivery) and `DeliveryEvent#supersedes?(occurred_at:, terminal:)` for ordering
+matched recipient events. See the [architecture guide](docs/architecture.md) for
+what the gem provides and what belongs in the inbox product.
+
+## Thread correlation
 
 Prefer storing the provider's returned `message_id` with your conversation and correlating inbound `In-Reply-To` / `References` against that record. Correlation does not authenticate the sender or authorize an action.
 
-`SecureMessageId` remains available for transports that preserve custom Message-IDs. It signs a compact JSON payload with HMAC-SHA256 and enforces a default 30-day age limit. It proves payload integrity, not the identity of the person replying. Payloads are encoded, not encrypted, and anyone who sees a token can reuse it until it expires.
+Use `Cloudflare::Email::MessageId.normalize(value)` to trim whitespace and one enclosing angle-bracket pair without changing the ID's case. The old `SecureMessageId` helper has been removed.
 
 Cloudflare's current [header documentation](https://developers.cloudflare.com/email-service/reference/headers/) describes Message-ID as platform-controlled. **The September 10 live test confirmed that Cloudflare replaced custom signed IDs**, including raw-MIME and ActionMailer sends. Store the provider ID for Cloudflare reply correlation. See [thread correlation](docs/thread-correlation.md) and the [live evidence](docs/verification/2026-09-10-live.md).
 
@@ -208,7 +219,7 @@ By default, only 429 responses and pre-send connection failures retry. Numeric a
 
 No idempotency key is sent. Reusing Message-ID does not guarantee deduplication or exactly-once delivery. Account for ActiveJob's retry policy too: retrying the whole mailer job can resend even when this client's retries are disabled.
 
-Errors inherit from `Cloudflare::Email::Error`: `ConfigurationError`, `AuthenticationError`, `ValidationError`, `RateLimitError`, `ServerError`, `NetworkError`, and `SecureMessageId::InvalidToken`. API errors expose `status` and parsed `response`.
+Errors inherit from `Cloudflare::Email::Error`: `ConfigurationError`, `AuthenticationError`, `ValidationError`, `RateLimitError`, `ServerError`, and `NetworkError`. API errors expose `status` and parsed `response`.
 
 ## Observability and permissions
 
@@ -270,6 +281,6 @@ Install the Worker tooling first; Node 22+ must be on PATH (or set `NODE_BINARY`
 
 See the [verification report](docs/verification/2026-09-10.md) for evidence, the historical dogfood inventory, Rebulk integration findings, and remaining live-provider checks.
 
-A subsequent [live verification pass](docs/verification/2026-09-10-live.md) exercised isolated sending, deployed ingress, binary attachments, reply threading, real LLM processing, and delivery-event redelivery/acknowledgement under `test.rebulk.com`. All temporary cloud resources were removed afterward. No DNS changes or RubyGems publication occurred. The report records remaining limits, including inbound envelope-aware mailbox selection and LLM draft quality.
+A subsequent [live verification pass](docs/verification/2026-09-10-live.md) exercised isolated sending, deployed ingress, binary attachments, reply threading, real LLM processing, and delivery-event redelivery/acknowledgement under `test.rebulk.com`. The [follow-up report](docs/verification/2026-09-10-followup.md) covers authenticated recipient routing and draft-review improvements after that run. Temporary cloud resources were removed afterward. No DNS changes or RubyGems publication occurred. These dated reports do not constitute live verification of later changes.
 
 MIT license.

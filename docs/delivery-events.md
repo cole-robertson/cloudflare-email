@@ -38,7 +38,74 @@ Rails.application.configure do
 end
 ```
 
-`DeliveryEventProcessor` is application code you provide. Persist the event and related delivery state transactionally before returning. Give the stored `event_id` a unique database index and make a repeated event a successful no-op. Do not merely enqueue a non-durable job and assume it has finished.
+`DeliveryEventProcessor` supplies application correlation and policy. For Rails,
+use the optional durable receipt adapter below to avoid implementing receipt
+storage, deduplication and replay yourself. Custom handlers must persist durably
+before returning; do not merely enqueue a non-durable job.
+
+### Durable Rails receipts
+
+```sh
+bin/rails generate cloudflare:email:tracking
+bin/rails db:migrate
+```
+
+The generator installs a receipt table and an initializer that explicitly loads
+`cloudflare/email/active_record/event_inbox`. ActiveRecord is not loaded by the
+plain Ruby client. Configure the queue handler to commit receipts:
+
+```ruby
+Rails.application.config.x.cloudflare_email.event_handler = ->(event) {
+  Cloudflare::Email::ActiveRecord::EventInbox.record(event)
+}
+```
+
+Run replay from your recurring job and after saving a send's provider ID:
+
+```ruby
+Cloudflare::Email::ActiveRecord::EventInbox.replay(account_id: account_id) do |event|
+  # Your own model; always scope by account, message AND recipient.
+  delivery = RecipientDelivery.find_by(
+    account_id: event.account_id,
+    provider_message_id: Cloudflare::Email::MessageId.normalize(event.message_id),
+    recipient: event.recipient,
+  )
+  next :unmatched unless delivery
+
+  delivery.with_lock do
+    if event.supersedes?(occurred_at: delivery.occurred_at, terminal: delivery.terminal?)
+      delivery.update!(status: event.status, occurred_at: event.occurred_at,
+                       terminal: event.terminal?)
+    end
+  end
+  :applied
+end
+```
+
+`record` stores the raw event and enforces uniqueness by account/event ID. An ID
+repeated with different content raises. Recording inside an existing database
+transaction raises, because returning before that transaction commits would allow
+premature acknowledgment. An acknowledged receipt can still be pending or unmatched;
+monitor and schedule replay separately from queue polling.
+
+`apply(receipt) { |event| ... }` and `replay` lock each receipt and skip applied
+records. Handlers must return `:applied` or `:unmatched`; exceptions and other return
+values roll back the receipt transition and writes on the same database connection.
+`:unmatched` is a successful transaction outcome, so avoid business writes before
+returning it. External effects and writes to other databases cannot be rolled back.
+Concurrent database conflicts raise; retry the job. Do not send email inside this
+handler; use durable outbound orchestration.
+
+Replay accepts optional `account_id:`, exact raw provider `message_id:`, and
+`batch_size:` filters. The batch size controls database fetch size, not the total
+number processed. `DeliveryEvent#supersedes?` accepts a Time or ISO8601 previous
+timestamp: only a newer known status replaces current state, equal timestamps keep
+existing state, and a nonterminal event cannot replace terminal state. A later
+terminal complaint can replace delivery. Invalid timestamps raise. Match records
+and lock recipient state before using this ordering helper.
+
+Receipt retention, recurring jobs, and monitoring are application decisions. See
+the [gem/inbox boundary](architecture.md) for outbound-ledger scope.
 
 Poll a single batch:
 
