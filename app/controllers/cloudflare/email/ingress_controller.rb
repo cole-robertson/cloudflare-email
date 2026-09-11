@@ -1,16 +1,12 @@
-require "cloudflare/email/verification"
+require "cloudflare/email/ingress"
 
 module Cloudflare
   module Email
     # ActionMailbox ingress for Cloudflare Email Worker forwards.
     #
-    # The shipped Worker template signs each forwarded message with HMAC-SHA256
-    # over "v2.{timestamp}.{encoded_envelope}.{raw_body}" and sends:
-    #   X-CF-Email-Timestamp: <unix seconds>
-    #   X-CF-Email-Signature: <hex digest>
-    #   X-CF-Email-Signature-Version: 2
-    #   X-CF-Email-Envelope: <unpadded base64url JSON from/to>
-    # Requests must include the v2 signature and authenticated SMTP envelope.
+    # The default Worker uses v2 authenticated SMTP envelopes; custom Workers
+    # can opt into v3 to authenticate additional provider metadata. Both use
+    # the shared, bounded Ingress verifier before any tenant lookup or storage.
     #
     # Set the shared secret in Rails credentials under cloudflare.ingress_secret
     # (or in the CLOUDFLARE_INGRESS_SECRET env var) and as the Worker secret
@@ -24,45 +20,30 @@ module Cloudflare
           "cloudflare_email.ingress",
           bytes: 0,
         ) do |payload|
-          preflight = Cloudflare::Email::Verification.verify_headers(secret: secret,
-            timestamp: request.headers["X-CF-Email-Timestamp"],
-            signature: request.headers["X-CF-Email-Signature"],
-            version: request.headers["X-CF-Email-Signature-Version"],
-            envelope: request.headers["X-CF-Email-Envelope"])
-          unless preflight == :ok
-            payload[:result] = preflight
-            next head(preflight == :stale ? :request_timeout : :unauthorized)
-          end
-          if request.content_length.to_i > max_email_bytes || raw_body.bytesize > max_email_bytes
-            payload[:result] = :too_large
-            next head(:payload_too_large)
-          end
-          payload[:bytes] = raw_body.bytesize
-          case Cloudflare::Email::Verification.verify(
-                secret:    secret,
-                body:      raw_body,
-                timestamp: request.headers["X-CF-Email-Timestamp"],
-                signature: request.headers["X-CF-Email-Signature"],
-                version: request.headers["X-CF-Email-Signature-Version"],
-                envelope: request.headers["X-CF-Email-Envelope"],
-              )
+          request.body.rewind if request.body.respond_to?(:rewind)
+          result = Cloudflare::Email::Ingress.verify(secret: secret,
+            headers: request.headers, body: request.body,
+            content_length: request.content_length, max_email_bytes: max_email_bytes)
+          payload[:bytes] = result.bytes.to_i
+          payload[:result] = result.status
+          case result.status
           when :stale
-            payload[:result] = :stale
             head :request_timeout
           when :bad_signature
-            payload[:result] = :bad_signature
             head :unauthorized
+          when :too_large
+            head :payload_too_large
           when :ok
             inbound = if defined?(Cloudflare::Email::Mailboxes) && Cloudflare::Email::Mailboxes.enabled?
-              recipient = Cloudflare::Email::Envelope.decode(request.headers["X-CF-Email-Envelope"]).fetch("to")
+              recipient = result.message.envelope.fetch("to")
               begin
-                Cloudflare::Email::Mailboxes.receive(recipient: recipient) { persist_inbound }
+                Cloudflare::Email::Mailboxes.receive(recipient: recipient) { result.message.persist_action_mailbox! }
               rescue Cloudflare::Email::Mailboxes::Unavailable
                 payload[:result] = :unavailable_mailbox
                 next head(:unprocessable_entity)
               end
             else
-              persist_inbound
+              result.message.persist_action_mailbox!
             end
             payload[:result]     = inbound ? :ok : :duplicate
             payload[:message_id] = inbound&.message_id
@@ -73,35 +54,10 @@ module Cloudflare
 
       private
 
-      def persist_inbound
-        envelope = Cloudflare::Email::Envelope.decode(request.headers["X-CF-Email-Envelope"])
-
-        # Commit trusted routing metadata before ActionMailbox's after_create_commit
-        # enqueues routing. Identical MIME for To/Cc/Bcc recipients is independent.
-        checksum = OpenSSL::Digest::SHA256.hexdigest("v2\0#{envelope.fetch('to')}\0".b + raw_body.b)
-        ActionMailbox::InboundEmail.transaction do
-          inbound = ActionMailbox::InboundEmail.create_and_extract_message_id!(raw_body, message_checksum: checksum)
-          if inbound
-            blob = inbound.raw_email.blob
-            blob.update!(metadata: blob.metadata.merge(
-              Cloudflare::Email::Envelope::METADATA_KEY => envelope.merge("version" => 2),
-            ))
-          end
-          inbound
-        end
-      end
-
       # Override ActionMailbox::BaseController's default name inference so
       # `config.action_mailbox.ingress = :cloudflare` gates this controller.
       def ingress_name
         :cloudflare
-      end
-
-      def raw_body
-        @raw_body ||= begin
-          request.body.rewind if request.body.respond_to?(:rewind)
-          request.body.read(max_email_bytes + 1).to_s
-        end
       end
 
       def max_email_bytes

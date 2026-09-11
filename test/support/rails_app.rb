@@ -189,16 +189,54 @@ class RailsAppTest < Minitest::Test
       Rails.env = original_env
     end
 
-    def signed_post(body, timestamp: Time.now.to_i.to_s, signature: nil, version: "2",
+    def signed_post(body, timestamp: Time.now.to_i.to_s, signature: nil, version: "2", metadata: nil,
       envelope: Cloudflare::Email::Envelope.encode(from: "sender@example.com", to: "receiver@example.com"))
       signature ||= Cloudflare::Email::Verification.sign(secret: ENV.fetch("CLOUDFLARE_INGRESS_SECRET"), body: body,
-        timestamp: timestamp, version: version, envelope: envelope)
+        timestamp: timestamp, version: version, envelope: envelope, metadata: metadata)
       post "/rails/action_mailbox/cloudflare/inbound_emails", body,
         "CONTENT_TYPE" => "message/rfc822",
         "HTTP_X_CF_EMAIL_TIMESTAMP" => timestamp,
         "HTTP_X_CF_EMAIL_SIGNATURE" => signature,
         "HTTP_X_CF_EMAIL_SIGNATURE_VERSION" => version,
-        "HTTP_X_CF_EMAIL_ENVELOPE" => envelope
+        "HTTP_X_CF_EMAIL_ENVELOPE" => envelope,
+        "HTTP_X_CF_EMAIL_METADATA" => metadata
+    end
+
+    def test_v3_preserves_binary_mime_and_metadata_before_routing
+      body = "From: visible@example.com\r\nTo: unrelated@example.com\r\nMessage-ID: <v3-metadata@example.com>\r\n\r\n".b + "\x00\xff".b
+      envelope = Cloudflare::Email::Envelope.encode(from: "smtp@example.com", to: "bcc@example.com")
+      metadata = { "source" => "cloudflare", "data" => { "archive_key" => "test/archive.eml" } }
+      encoded = Cloudflare::Email::Signing.base64url_encode(JSON.generate(metadata))
+      observed = nil
+      ActionMailbox::RoutingJob.stub(:perform_later, ->(inbound) {
+        observed = [Cloudflare::Email::Envelope.for(inbound.reload), Cloudflare::Email::ProviderMetadata.for(inbound)]
+      }) do
+        signed_post(body, version: "3", envelope: envelope, metadata: encoded)
+      end
+      assert_equal 200, last_response.status, last_response.body
+      assert_equal [{ "from" => "smtp@example.com", "to" => "bcc@example.com" }, metadata], observed
+      inbound = ActionMailbox::InboundEmail.find_by!(message_id: "v3-metadata@example.com")
+      assert_equal metadata, Cloudflare::Email::ProviderMetadata.for(inbound.reload)
+      assert_equal body, inbound.raw_email.download
+      before = ActionMailbox::InboundEmail.count
+      signed_post(body, version: "3", envelope: envelope, metadata: encoded)
+      assert_equal 200, last_response.status
+      assert_equal before, ActionMailbox::InboundEmail.count
+    end
+
+    def test_v2_rejects_extra_provider_metadata_before_persistence_or_routing
+      body = "From: sender@example.com\r\nMessage-ID: <unsigned-provider-metadata@example.com>\r\n\r\nBody\r\n"
+      timestamp = Time.now.to_i.to_s
+      envelope = Cloudflare::Email::Envelope.encode(from: "sender@example.com", to: "receiver@example.com")
+      signature = Cloudflare::Email::Verification.sign(secret: ENV.fetch("CLOUDFLARE_INGRESS_SECRET"),
+        body: body, timestamp: timestamp, envelope: envelope)
+      metadata = Cloudflare::Email::Signing.base64url_encode(JSON.generate({ "source" => "cloudflare", "data" => {} }))
+      before = ActionMailbox::InboundEmail.count
+      ActionMailbox::RoutingJob.stub(:perform_later, ->(*) { flunk "unsigned provider metadata must not route" }) do
+        signed_post(body, timestamp: timestamp, signature: signature, envelope: envelope, metadata: metadata)
+      end
+      assert_equal 401, last_response.status
+      assert_equal before, ActionMailbox::InboundEmail.count
     end
 
     def test_v2_preserves_mime_and_commits_trusted_envelope_before_routing
@@ -233,15 +271,19 @@ class RailsAppTest < Minitest::Test
     end
 
     def test_ingress_bounds_body_reads_even_without_content_length
-      previous = ENV["MAX_EMAIL_BYTES"]
-      ENV["MAX_EMAIL_BYTES"] = "16"
       stream = StringIO.new("example MIME body bytes")
-      controller = Cloudflare::Email::IngressController.new
-      controller.define_singleton_method(:request) { Struct.new(:body).new(stream) }
-      assert_equal 17, controller.send(:raw_body).bytesize
+      envelope = Cloudflare::Email::Envelope.encode(from: "sender@example.com", to: "receiver@example.com")
+      timestamp = Time.now.to_i.to_s
+      signature = Cloudflare::Email::Verification.sign(secret: ENV.fetch("CLOUDFLARE_INGRESS_SECRET"),
+        timestamp: timestamp, envelope: envelope, body: stream.string)
+      result = Cloudflare::Email::Ingress.verify(secret: ENV.fetch("CLOUDFLARE_INGRESS_SECRET"),
+        body: stream, content_length: nil, max_email_bytes: 16, headers: {
+          "X-CF-Email-Timestamp" => timestamp, "X-CF-Email-Signature" => signature,
+          "X-CF-Email-Signature-Version" => "2", "X-CF-Email-Envelope" => envelope
+        })
+      assert_equal :too_large, result.status
+      assert_nil result.message
       assert_equal 17, stream.pos
-    ensure
-      ENV["MAX_EMAIL_BYTES"] = previous
     end
 
     def test_v2_deduplication_is_scoped_to_exact_smtp_recipient

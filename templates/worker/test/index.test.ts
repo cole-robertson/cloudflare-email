@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import worker from "../src/index.js";
+import worker, { forwardEmail, signedEmailHeaders } from "../src/index.js";
 
 // Minimal fake EmailMessage implementing the surface the Worker uses.
 function makeMessage(raw: string) {
@@ -75,6 +75,7 @@ describe("cloudflare-email Worker", () => {
     const sig = opts.headers["X-CF-Email-Signature"];
     const envelope = opts.headers["X-CF-Email-Envelope"];
     expect(opts.headers["X-CF-Email-Signature-Version"]).toBe("2");
+    expect(opts.headers["X-CF-Email-Metadata"]).toBeUndefined();
     expect(JSON.parse(atob(envelope.replace(/-/g, "+").replace(/_/g, "/")))).toEqual({
       from: "sender@external.test", to: "inbox@trial.test",
     });
@@ -247,5 +248,62 @@ describe("cloudflare-email Worker", () => {
     const sig2 = fetchSpy.mock.calls[0][1].headers["X-CF-Email-Signature"];
 
     expect(sig1).not.toBe(sig2);
+  });
+
+  const metadata = { source: "cloudflare", data: { note: "Résumé ☁", spf: "pass", score: 0.5, flags: [true, null] } };
+  const signingInput = { secret: SECRET, raw: new Uint8Array([0, 255, 13, 10, 128]), from: "sender@external.test", to: "inbox@trial.test", timestamp: "1750000000" };
+
+  it("matches the shared v3 binary body and UTF8 metadata vector", async () => {
+    const headers = await signedEmailHeaders({ ...signingInput, metadata });
+    expect(headers["X-CF-Email-Signature-Version"]).toBe("3");
+    expect(headers["X-CF-Email-Metadata"]).toBe("eyJzb3VyY2UiOiJjbG91ZGZsYXJlIiwiZGF0YSI6eyJub3RlIjoiUsOpc3Vtw6kg4piBIiwic3BmIjoicGFzcyIsInNjb3JlIjowLjUsImZsYWdzIjpbdHJ1ZSxudWxsXX19");
+    expect(headers["X-CF-Email-Signature"]).toBe("d4e5ed55306e1619b5c40f3ec5dfea44a3131ad422a22b49ffb042069f6b720f");
+    for (const changed of [{ ...metadata, source: "other" }, { ...metadata, data: { ...metadata.data, spf: "fail" } }]) {
+      expect((await signedEmailHeaders({ ...signingInput, metadata: changed }))["X-CF-Email-Signature"]).not.toBe(headers["X-CF-Email-Signature"]);
+    }
+  });
+
+  it("forwards opt-in metadata while preserving raw MIME and normal transport policy", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(1750000000000);
+    const { message, rejects } = makeMessage(RAW);
+    await forwardEmail(message, { RAILS_INGRESS_URL: URL_, INGRESS_SECRET: SECRET }, { metadata });
+    expect(rejects).toEqual([]);
+    const options = fetchSpy.mock.calls[0][1];
+    expect(options.headers).toEqual(await signedEmailHeaders({ ...signingInput, raw: new TextEncoder().encode(RAW), metadata }));
+    expect(options.redirect).toBe("manual");
+    expect(new TextDecoder().decode(options.body)).toBe(RAW);
+  });
+
+  it.each([null, {}, { source: "Cloudflare", data: {} }, { source: "a\n", data: {} },
+    { source: "a".repeat(129), data: {} }, { source: "a", data: [] },
+    { source: "a", data: {}, extra: true }, { source: "a", data: { x: undefined } },
+    { source: "a", data: { x: NaN } }, { source: "a", data: { x: new Date() } },
+    { source: "a", data: { x: "\uD800" } }, { source: "a", data: { "\uDC00": true } },
+    { source: "a", data: { x: "x".repeat(16384) } }])("rejects malformed metadata without downgrading to v2 (%j)", async (invalid) => {
+    await expect(signedEmailHeaders({ ...signingInput, metadata: invalid })).rejects.toThrow();
+    const { message, rejects } = makeMessage(RAW);
+    await forwardEmail(message, { RAILS_INGRESS_URL: URL_, INGRESS_SECRET: SECRET }, { metadata: invalid });
+    expect(rejects).toEqual(["worker could not sign envelope or provider metadata"]);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("bounds metadata nesting including cyclic data", async () => {
+    const data: any = {};
+    let node = data;
+    for (let i = 0; i < 6; i++) { node.child = {}; node = node.child; }
+    await expect(signedEmailHeaders({ ...signingInput, metadata: { source: "a", data } })).resolves.toBeDefined();
+    node.child = {};
+    await expect(signedEmailHeaders({ ...signingInput, metadata: { source: "a", data } })).rejects.toThrow();
+    data.child = data;
+    await expect(signedEmailHeaders({ ...signingInput, metadata: { source: "a", data } })).rejects.toThrow();
+  });
+
+  it("enforces the encoded metadata size boundary", async () => {
+    // The JSON wrapper occupies 33 UTF8 bytes; 12288 bytes encode to 16384 characters.
+    const atLimit = { source: "a", data: { text: "x".repeat(12288 - 33) } };
+    const headers = await signedEmailHeaders({ ...signingInput, metadata: atLimit });
+    expect(headers["X-CF-Email-Metadata"]).toHaveLength(16384);
+    atLimit.data.text += "x";
+    await expect(signedEmailHeaders({ ...signingInput, metadata: atLimit })).rejects.toThrow(/16384/);
   });
 });

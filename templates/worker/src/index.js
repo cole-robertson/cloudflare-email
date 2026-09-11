@@ -4,6 +4,7 @@
  * Receives mail via Cloudflare Email Routing, signs the raw RFC822 with
  * HMAC-SHA256 over "v2.{timestamp}.{encoded_envelope}.{raw_body}", and POSTs it to the Rails
  * ingress controller shipped with the cloudflare-email gem.
+ * Custom integrations can opt into v3, binding provider metadata into the signature.
  *
  * Required environment variables (set via `wrangler secret put` OR the
  * `cloudflare:email:deploy_worker` rake task shipped with this gem):
@@ -75,8 +76,73 @@ async function readBounded(stream, limit) {
   return raw;
 }
 
-export default {
-  async email(message, env) {
+function plainObject(value) {
+  return value !== null && typeof value === "object" &&
+    [Object.prototype, null].includes(Object.getPrototypeOf(value));
+}
+
+function validateJson(value, depth = 1) {
+  if (typeof value === "string") {
+    if (/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u.test(value)) {
+      throw new TypeError("metadata strings must be valid Unicode");
+    }
+    return;
+  }
+  if (value === null || typeof value === "boolean" ||
+      (typeof value === "number" && Number.isFinite(value))) return;
+  if (depth > 8 || (!Array.isArray(value) && !plainObject(value))) {
+    throw new TypeError("metadata must contain JSON values with at most 8 container levels");
+  }
+  for (const [key, item] of Object.entries(value)) {
+    validateJson(key, depth + 1);
+    validateJson(item, depth + 1);
+  }
+}
+
+function base64url(value) {
+  const bytes = new TextEncoder().encode(value);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function encodeMetadata(metadata) {
+  if (!plainObject(metadata) || Object.keys(metadata).sort().join(",") !== "data,source" ||
+      typeof metadata.source !== "string" || !/^[a-z][a-z0-9_.-]{0,127}$/.test(metadata.source) ||
+      !plainObject(metadata.data)) throw new TypeError("invalid provider metadata");
+  validateJson(metadata);
+  const encoded = base64url(JSON.stringify({ source: metadata.source, data: metadata.data }));
+  if (encoded.length > 16384) throw new TypeError("encoded metadata exceeds 16384 characters");
+  return encoded;
+}
+
+// Custom transports own their body limits, destination, retries and error handling.
+// Metadata is a host assertion; never derive trusted facts from MIME headers.
+export async function signedEmailHeaders({ secret, raw, from, to, metadata, timestamp = Math.floor(Date.now() / 1000).toString() }) {
+  if (typeof secret !== "string" || secret.length === 0) throw new TypeError("missing ingress secret");
+  if (!(raw instanceof Uint8Array)) throw new TypeError("raw must be a Uint8Array");
+  if (!validAddress(from, true) || !validAddress(to)) throw new TypeError("invalid SMTP envelope");
+  const ts = String(timestamp);
+  if (!/^[0-9]{1,12}$/.test(ts)) throw new TypeError("invalid timestamp");
+  const envelope = base64url(JSON.stringify({ from, to }));
+  const encodedMetadata = metadata === undefined ? undefined : encodeMetadata(metadata);
+  const version = encodedMetadata === undefined ? "2" : "3";
+  const prefix = new TextEncoder().encode(`v${version}.${ts}.${envelope}.${encodedMetadata === undefined ? "" : `${encodedMetadata}.`}`);
+  const signedPayload = new Uint8Array(prefix.length + raw.length);
+  signedPayload.set(prefix);
+  signedPayload.set(raw, prefix.length);
+  const headers = {
+    "Content-Type": "message/rfc822",
+    "X-CF-Email-Timestamp": ts,
+    "X-CF-Email-Signature": await sign(secret, signedPayload),
+    "X-CF-Email-Signature-Version": version,
+    "X-CF-Email-Envelope": envelope,
+  };
+  if (encodedMetadata !== undefined) headers["X-CF-Email-Metadata"] = encodedMetadata;
+  return headers;
+}
+
+export async function forwardEmail(message, env, { metadata } = {}) {
     if (!env.RAILS_INGRESS_URL || !env.INGRESS_SECRET) {
       message.setReject("worker missing RAILS_INGRESS_URL or INGRESS_SECRET");
       return;
@@ -100,10 +166,6 @@ export default {
       message.setReject("worker received invalid SMTP envelope");
       return;
     }
-    // Routing metadata comes from the SMTP envelope, never from MIME headers.
-    const envelope = btoa(JSON.stringify({ from: message.from, to: message.to }))
-      .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-
     let raw;
     try {
       raw = await readBounded(message.raw, limit);
@@ -111,14 +173,13 @@ export default {
       message.setReject("message exceeds size limit or could not be read");
       return;
     }
-    const ts = Math.floor(Date.now() / 1000).toString();
-
-    const tsBytes = new TextEncoder().encode(`v2.${ts}.${envelope}.`);
-    const signedPayload = new Uint8Array(tsBytes.length + raw.length);
-    signedPayload.set(tsBytes, 0);
-    signedPayload.set(raw, tsBytes.length);
-
-    const signature = await sign(env.INGRESS_SECRET, signedPayload);
+    let headers;
+    try {
+      headers = await signedEmailHeaders({ secret: env.INGRESS_SECRET, raw, from: message.from, to: message.to, metadata });
+    } catch {
+      message.setReject("worker could not sign envelope or provider metadata");
+      return;
+    }
 
     let res;
     const controller = new AbortController();
@@ -126,13 +187,7 @@ export default {
     try {
       res = await fetch(env.RAILS_INGRESS_URL, {
         method: "POST",
-        headers: {
-          "Content-Type": "message/rfc822",
-          "X-CF-Email-Timestamp": ts,
-          "X-CF-Email-Signature": signature,
-          "X-CF-Email-Signature-Version": "2",
-          "X-CF-Email-Envelope": envelope,
-        },
+        headers,
         body: raw,
         signal: controller.signal,
         // Workers supports follow/manual; non-2xx handling below rejects redirects.
@@ -148,5 +203,8 @@ export default {
     if (!res.ok) {
       message.setReject(`upstream returned ${res.status}`);
     }
-  },
+}
+
+export default {
+  email(message, env) { return forwardEmail(message, env); },
 };

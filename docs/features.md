@@ -29,6 +29,18 @@ a tenant connection adapter. A mailbox tenant key alone does not switch database
 | Observe email processing | ActiveSupport notifications + `doctor` | Send/ingress/event/outbox instrumentation and configuration diagnostics |
 | Deploy receiving infrastructure | Ruby deployer and routing tasks | Environment-specific Workers, ingress secrets, address routes and DNS preflight checks |
 
+## Upcoming integration tools (unreleased)
+
+Existing ingestion pipelines can use [custom ingress](custom-ingress.md) to
+verify bounded raw messages before tenant lookup, keep their own storage, or
+persist through ActionMailbox. Optional v3 signatures authenticate custom Worker
+metadata; your application still decides whether its provenance and sender policy
+are acceptable. The bundled Worker continues to use v2 by default.
+
+[Read-only routing diagnostics](routing-diagnostics.md) inspect exact-domain DNS
+and the selected Worker route. They distinguish missing configuration from an
+incomplete inspection; a passing snapshot does not prove live email delivery.
+
 ## SQLite works
 
 The optional receipt and outbox tables work with **SQLite**. Keep your existing
@@ -58,7 +70,7 @@ subscriptions. The [getting-started guide](getting-started.md) walks through eac
 
 ## Protections included
 
-Incoming requests use v2 HMAC signatures covering the timestamp, SMTP sender,
+By default, incoming requests use v2 HMAC signatures covering the timestamp, SMTP sender,
 SMTP recipient and raw message. Rails checks a five-minute timestamp window.
 Identical MIME retried for the same recipient is deduplicated; delivery to a
 different recipient is stored separately.

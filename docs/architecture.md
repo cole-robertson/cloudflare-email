@@ -14,7 +14,7 @@ durable infrastructure without copying the reference inbox's models and services
 | Shared event intake, tenant correlation and tenant-aware jobs | Durable queue workers, scheduled recovery and schema rollout to every tenant |
 | Structured/raw sending and ActionMailer transport | Compose UI, recipients and send authorization |
 | `Response#accepted?`, plus individual recipient outcomes | Handle partial acceptance without resending accepted recipients |
-| Authenticated v2 ingress and recipient-scoped deduplication | Map trusted recipient to an authorized mailbox |
+| Authenticated ingress (default v2; unreleased opt-in v3 [metadata](custom-ingress.md)) and context-scoped deduplication | Map trusted recipient to an authorized mailbox; apply sender and document policy |
 | `MessageId.normalize` and returned provider IDs | Store conversation membership and scope reply lookups |
 | Queue decoding, validation and ACK | Queue/subscription setup and recurring execution |
 | Optional ActiveRecord event receipts, deduplication and indexed replay | Configure queue polling and receipt retention |
