@@ -32,6 +32,11 @@ module Cloudflare
       end
 
       config.before_initialize do
+        unless defined?(Cloudflare::Email::Management::Engine)
+          Rails.autoloaders.main.ignore(
+            File.expand_path("../../../app/controllers/cloudflare/email/management", __dir__),
+          )
+        end
         unless defined?(::ActionMailbox::Engine)
           Rails.autoloaders.main.ignore(
             File.expand_path("../../../app/controllers/cloudflare/email/ingress_controller.rb", __dir__),

@@ -1,0 +1,83 @@
+<nav class="breadcrumbs" aria-label="Breadcrumb"><%= link_to "Mailboxes", root_path %> <span aria-hidden="true">/</span> <span><%= @mailbox.name %></span></nav>
+<div class="page-heading">
+  <div>
+    <p class="eyebrow">Mailbox</p>
+    <h1><%= @mailbox.name %></h1>
+    <p class="muted"><%= @mailbox.state == "suspended" ? "Receiving is paused for every address in this mailbox." : "Addresses receive mail when both their address and domain are active." %></p>
+  </div>
+  <div class="actions">
+    <span class="badge"><%= @mailbox.state.capitalize %></span>
+    <% if @mailbox.state == "active" && allowed?(:suspend, @mailbox) %>
+      <%= button_to "Suspend mailbox", suspend_mailbox_path(@mailbox.id), method: :post, class: "button button-secondary" %>
+    <% elsif @mailbox.state == "suspended" && allowed?(:resume, @mailbox) %>
+      <%= button_to "Resume mailbox", resume_mailbox_path(@mailbox.id), method: :post, class: "button" %>
+    <% end %>
+  </div>
+</div>
+
+<div class="workspace-grid">
+  <section class="panel" aria-labelledby="messages-heading">
+    <div class="panel-heading"><h2 id="messages-heading">Received messages</h2><p class="muted small">Includes archived messages</p></div>
+    <% if @messages.empty? %>
+      <div class="empty-state"><h3>No messages to show</h3><p>Messages appear here after delivery to an active address.</p></div>
+    <% else %>
+      <ul class="record-list">
+        <% @messages.each do |entry| %>
+          <li class="record-row">
+            <div class="record-content">
+              <% if allowed?(:show_message, @mailbox) %>
+                <%= link_to "Message to #{entry.recipient}", message_mailbox_path(@mailbox.id, message_id: entry.id), class: "record-title" %>
+              <% else %>
+                <span class="record-title">Message to <%= entry.recipient %></span>
+              <% end %>
+              <p class="muted small"><time datetime="<%= entry.created_at.iso8601 %>"><%= entry.created_at.utc.strftime("%b %-d, %Y · %H:%M UTC") %></time></p>
+            </div>
+            <div class="status-list">
+              <span class="badge"><%= entry.read_at ? "Read" : "Unread" %></span>
+              <% if entry.archived_at %><span class="badge">Archived</span><% end %>
+            </div>
+          </li>
+        <% end %>
+      </ul>
+    <% end %>
+    <% if @next_cursor.present? %>
+      <nav class="pagination" aria-label="Message pages"><%= link_to "Next messages →", mailbox_path(@mailbox.id, after: @next_cursor), class: "button button-secondary" %></nav>
+    <% end %>
+  </section>
+
+  <div class="stack">
+    <section class="panel" aria-labelledby="addresses-heading">
+      <div class="panel-heading"><h2 id="addresses-heading">Addresses</h2></div>
+      <ul class="record-list">
+        <% @addresses.each do |address| %>
+          <% receiving = @mailbox.state == "active" && address.state == "active" && address.receiving_domain&.state == "active" %>
+          <li class="record-row address-row">
+            <span class="record-title"><%= address.address %></span>
+            <span class="badge"><%= receiving ? "Accepting mail" : address.state == "pending" ? "Pending setup" : "Receiving paused" %></span>
+          </li>
+        <% end %>
+      </ul>
+      <div class="panel-body"><p class="field-help">Pending addresses need routing confirmation from your administrator. Resuming a mailbox preserves each address’s existing setup state.</p></div>
+    </section>
+
+    <% if allowed?(:add_address, @mailbox) %>
+      <section class="panel" aria-labelledby="alias-heading">
+        <div class="panel-heading"><h2 id="alias-heading">Add an alias</h2></div>
+        <div class="panel-body">
+          <% if @domains.empty? %>
+            <p class="muted">No active receiving domains are available. Contact your administrator.</p>
+          <% else %>
+            <%= form_with url: aliases_mailbox_path(@mailbox.id), local: true, class: "stack" do |form| %>
+              <div class="field">
+                <%= form.label :address, "Alias email address" %>
+                <%= form.email_field :address, required: true, maxlength: 254, aria: { describedby: "alias-domains" } %>
+                <p id="alias-domains" class="field-help">Available domains: <%= @domains.join(", ") %>. Messages to this alias will appear in this mailbox.</p>
+              </div>
+              <%= form.submit "Add alias", class: "button" %>
+            <% end %>
+          <% end %>
+        </div>
+      </section>
+    <% end %>
+  </div>
+</div>

@@ -1,0 +1,65 @@
+<div class="page-heading">
+  <div>
+    <p class="eyebrow">Email workspace</p>
+    <h1>Mailboxes</h1>
+    <p class="muted">Manage accepted addresses and the messages delivered to them.</p>
+  </div>
+</div>
+
+<div class="workspace-grid">
+  <section class="panel" aria-labelledby="mailboxes-heading">
+    <div class="panel-heading"><h2 id="mailboxes-heading">Your mailboxes</h2></div>
+    <% if @mailboxes.empty? %>
+      <div class="empty-state">
+        <h3>No mailboxes to show</h3>
+        <p>Create a mailbox to give incoming email a home.</p>
+      </div>
+    <% else %>
+      <ul class="record-list">
+        <% @mailboxes.each do |mailbox| %>
+          <li class="record-row">
+            <div class="record-content">
+              <% if allowed?(:show, mailbox) %>
+                <%= link_to mailbox.name, mailbox_path(mailbox.id), class: "record-title" %>
+              <% else %>
+                <span class="record-title"><%= mailbox.name %></span>
+              <% end %>
+              <p class="muted small">Mailbox #<%= mailbox.id %></p>
+            </div>
+            <span class="badge"><%= mailbox.state.capitalize %></span>
+          </li>
+        <% end %>
+      </ul>
+    <% end %>
+    <% if @next_cursor.present? %>
+      <nav class="pagination" aria-label="Mailbox pages">
+        <%= link_to "Next mailboxes →", root_path(after: @next_cursor), class: "button button-secondary" %>
+      </nav>
+    <% end %>
+  </section>
+
+  <% if allowed?(:create) %>
+    <section class="panel" aria-labelledby="create-heading">
+      <div class="panel-heading"><h2 id="create-heading">Create a mailbox</h2></div>
+      <div class="panel-body">
+        <% if @domains.empty? %>
+          <p class="muted">An administrator needs to register an active receiving domain before you can create a mailbox.</p>
+        <% else %>
+          <%= form_with url: mailboxes_path, scope: :mailbox, local: true, class: "stack" do |form| %>
+            <div class="field">
+              <%= form.label :name, "Mailbox name" %>
+              <%= form.text_field :name, required: true, maxlength: 255, placeholder: "Customer support" %>
+            </div>
+            <div class="field">
+              <%= form.label :address, "Email address" %>
+              <%= form.email_field :address, required: true, maxlength: 254, placeholder: "support@#{@domains.first}", aria: { describedby: "create-domains" } %>
+              <p id="create-domains" class="field-help">Available domains: <%= @domains.join(", ") %></p>
+            </div>
+            <p class="field-help">New addresses start pending. Your administrator must confirm their routing before they can receive mail.</p>
+            <%= form.submit "Create mailbox", class: "button" %>
+          <% end %>
+        <% end %>
+      </div>
+    </section>
+  <% end %>
+</div>

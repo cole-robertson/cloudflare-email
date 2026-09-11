@@ -16,6 +16,7 @@ Version **0.2.0**. Ruby 3.2+, Rails 7.2–8.1; Ruby 4.0 is tested with Rails 8.1
 | [Getting started](docs/getting-started.md) | Install, send your first email, receive replies, and save reliable send operations |
 | [Troubleshooting](docs/troubleshooting.md) | What to check when mail or delivery updates do not arrive |
 | [Managed mailboxes](docs/mailboxes.md) | Create inboxes and aliases, read/archive mail, and send from a mailbox |
+| [Management engine (unreleased)](docs/management-engine.md) | Mount an optional server-rendered mailbox UI using your app's authentication |
 | [SQLite tenant databases](docs/activerecord-tenanted.md) | Give each organization its own SQLite database with `activerecord-tenanted` |
 | [Durable outbox](docs/outbox.md) | Detailed setup, callbacks, retries, and recovery |
 | [Delivery events](docs/delivery-events.md) | Cloudflare Queue setup and recipient status tracking |

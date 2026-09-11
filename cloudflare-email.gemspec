@@ -24,6 +24,8 @@ Gem::Specification.new do |spec|
     "lib/**/*.rb",
     "lib/**/*.rake",
     "app/**/*.rb",
+    "app/views/**/*.erb",
+    "lib/cloudflare/email/management/*.css",
     "templates/worker/README.md",
     "templates/worker/package.json",
     "templates/worker/package-lock.json",
