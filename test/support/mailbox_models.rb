@@ -1,6 +1,7 @@
 require "bundler/setup"
 require "minitest/autorun"
 require "active_record"
+ActiveRecord.raise_on_assign_to_attr_readonly = true
 require "tmpdir"
 require "cloudflare-email"
 
@@ -55,7 +56,7 @@ class MailboxModelPersistenceTest < Minitest::Test
 
   def test_record_identity_and_current_tenant_are_guarded
     record = create_address
-    record.update!(local_part: "renamed")
+    assert_raises(ActiveRecord::ReadonlyAttributeError) { record.update!(local_part: "renamed") }
     assert_equal "support", record.reload.local_part
     assert_equal "support@customer.example.com", record.address
     Tenancy.with("two") do
@@ -82,6 +83,20 @@ class MailboxModelPersistenceTest < Minitest::Test
       Models::Message.create!(tenant_key: "one", mailbox: @mailbox, inbound_email_id: 123, recipient: "alias@customer.example.com")
     end
     assert_raises(ActiveRecord::DeleteRestrictionError) { @mailbox.destroy! }
+  end
+
+  def test_strict_readonly_allows_lifecycle_updates_without_reassigning_identity
+    address = create_address
+    @domain.update!(state: "suspended")
+    @domain.update!(state: "active", sending_enabled: true, provisioning_evidence: "Verified test domain")
+    address.update!(state: "active", provisioning_evidence: "Verified test route")
+    address.update!(state: "suspended")
+    assert_equal "customer.example.com", @domain.reload.domain
+    assert @domain.sending_enabled
+    assert_equal "support@customer.example.com", address.reload.address
+    assert_equal "suspended", address.state
+    assert_raises(ActiveRecord::ReadonlyAttributeError) { @domain.domain = "other.example.com" }
+    assert_raises(ActiveRecord::ReadonlyAttributeError) { address.address = "other@customer.example.com" }
   end
 
   private
