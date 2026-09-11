@@ -141,7 +141,10 @@ The adapter has these hooks:
 | `create_mailbox(session, name:, address:)` | Return the created gem mailbox, visible in the host's scope. |
 | `add_address(session, mailbox, address:)` | Add an address through your existing app provisioning service if needed. |
 
-All hooks run inside the resolved mailbox context. Creation also runs in a
+The adapter factory, authentication and tenant-key resolution run before the
+mailbox context is entered; the host must establish any context its authentication
+needs. Mailbox/domain scopes, permissions and mutation hooks run inside the
+resolved mailbox context. Creation also runs in a
 database transaction; a returned mailbox outside the host scope rolls back.
 Keep network work out of creation hooks and enqueue provisioning after commit.
 The default alias hook calls `session.add_address`.

@@ -376,4 +376,15 @@ class ManagementEngineIntegrationTest < Minitest::Test
     assert_includes [303, 422], last_response.status
     assert_nil member.reload.archived_at
   end
+
+  def test_malformed_mailbox_parameter_shapes_do_not_create_records_or_raise
+    mailbox_count = Email::Mailboxes::Mailbox.count
+    address_count = Email::Mailboxes::Address.count
+    ["scalar", ["array"]].each do |value|
+      mutate "#{PREFIX}/mailboxes", { mailbox: value }, source: "#{PREFIX}/mailboxes"
+      assert_equal 303, last_response.status
+      assert_equal mailbox_count, Email::Mailboxes::Mailbox.count
+      assert_equal address_count, Email::Mailboxes::Address.count
+    end
+  end
 end

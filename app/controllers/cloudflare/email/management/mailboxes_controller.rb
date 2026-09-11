@@ -14,10 +14,10 @@ module Cloudflare
         rescue_from Denied do
           head :forbidden
         end
-        rescue_from ::ActiveRecord::RecordNotFound do
+        rescue_from "ActiveRecord::RecordNotFound" do
           head :not_found
         end
-        rescue_from InvalidInput, ::ActiveRecord::RecordInvalid, Cloudflare::Email::Error do
+        rescue_from InvalidInput, "ActiveRecord::RecordInvalid", Cloudflare::Email::Error do
           redirect_to(@mailbox ? mailbox_path(@mailbox) : root_path,
             alert: "The changes could not be saved. Check the address, registered domain and required fields.",
             status: :see_other)
@@ -41,7 +41,9 @@ module Cloudflare
 
         def create
           authorize!(:create)
-          values = params.require(:mailbox).permit(:name, :address)
+          input = params.require(:mailbox)
+          raise InvalidInput unless input.is_a?(ActionController::Parameters)
+          values = input.permit(:name, :address)
           name = values[:name].to_s.strip
           raise InvalidInput unless (1..255).cover?(name.length)
           address = permitted_address!(values[:address])
