@@ -52,5 +52,5 @@ Gem::Specification.new do |spec|
   # in the Gemfile variants and include the current security fixes.
   spec.add_development_dependency "rack-test", "~> 2.1"
   # Rails through 8.1 passes a positional options hash to JSON.parse.
-  spec.add_development_dependency "json", ">= 2.0", "< 3.0"
+  spec.add_development_dependency "json", ">= 2.0", "< 4.0"
 end
