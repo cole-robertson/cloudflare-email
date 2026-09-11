@@ -2,6 +2,7 @@ require_relative "../test_helper"
 require "tmpdir"
 require "fileutils"
 require "active_record"
+ActiveRecord.raise_on_assign_to_attr_readonly = true
 require "mail"
 require "minitest/mock"
 require "cloudflare/email/tenancy"

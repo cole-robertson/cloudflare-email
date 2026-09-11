@@ -10,7 +10,7 @@ module Cloudflare
         self.table_name = "cloudflare_email_receiving_domains"
         STATES = %w[pending active suspended].freeze
         attr_readonly :domain, :tenant_key, :account_id
-        before_validation { self.domain = domain.to_s.strip.downcase }
+        before_validation(on: :create) { self.domain = domain.to_s.strip.downcase }
         validates :tenant_key, :account_id, presence: true
         validates :domain, presence: true, uniqueness: true,
           length: { maximum: 253 },
@@ -71,7 +71,7 @@ module Cloudflare
         self.table_name = "cloudflare_email_addresses"
         belongs_to :mailbox, class_name: "Cloudflare::Email::Mailboxes::Mailbox"
         attr_readonly :mailbox_id, :receiving_domain_id, :local_part, :domain, :address
-        before_validation :normalize_address
+        before_validation :normalize_address, on: :create
         validates :mailbox, :receiving_domain_id, presence: true
         validates :local_part, length: { in: 1..64 },
           format: { with: /\A[a-z0-9!\#$%&'*+\/=\?^_`{|}~-]+(?:\.[a-z0-9!\#$%&'*+\/=\?^_`{|}~-]+)*\z/ }

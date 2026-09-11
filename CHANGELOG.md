@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Fix managed domain and address activation in Rails apps with strict readonly
+  attributes enabled. Normalize immutable identities only when creating records;
+  later lifecycle updates retain the original domain and address.
+
 ## 0.2.0 — 2026-09-11
 
 - Add optional managed mailboxes: domain directory, addresses/aliases, lifecycle,
