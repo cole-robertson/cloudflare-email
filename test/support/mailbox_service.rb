@@ -23,6 +23,9 @@ class ServiceTenantRecord < ActiveRecord::Base
     [key, { writing: { adapter: "sqlite3", database: File.join(SERVICE_ROOT, "#{key}.sqlite3") } }]
   }
 end
+class ServiceEmailReceipt < ServiceTenantRecord
+  self.table_name = "host_email_receipts"
+end
 Cloudflare::Email::Tenancy.configure(base_class: ServiceTenantRecord,
   switch: ->(key, &block) { ServiceTenantRecord.connected_to(role: :writing, shard: key.to_sym, &block) },
   current: -> { ServiceTenantRecord.current_shard.to_s })
@@ -46,6 +49,11 @@ CreateCloudflareEmailSharedEvents.new.migrate(:up)
     CreateCloudflareEmailOutbox.new.migrate(:up)
     CreateCloudflareEmailEventReceipts.new.migrate(:up)
     CreateCloudflareEmailMailboxes.new.migrate(:up)
+    ServiceTenantRecord.connection.create_table(:host_email_receipts) do |table|
+      table.integer :mailbox_id
+      table.string :recipient
+      table.binary :raw
+    end
   end
 end
 ActiveJob::Base.queue_adapter = :test
@@ -67,6 +75,7 @@ class MailboxServiceIntegrationTest < Minitest::Test
       SERVICE_CLIENTS[key] = Email::Client.new(account_id: "shared", api_token: "test-token", retries: 0, retry_ambiguous: false)
       Box.for_tenant(key) do |session|
         [Box::OutboundMessage, Box::Message, Box::Address, Box::Mailbox,
+          ServiceEmailReceipt,
           Email::ActiveRecord::EventReceipt, Email::ActiveRecord::OutboundReconciliation,
           Email::ActiveRecord::OutboundRecipient, Delivery].each(&:delete_all)
         ServiceTenantRecord.connection.execute("DELETE FROM sqlite_sequence WHERE name = 'cloudflare_email_mailboxes'")
@@ -135,6 +144,99 @@ class MailboxServiceIntegrationTest < Minitest::Test
     end
     Box.for_tenant("beta") { |session| assert_equal 0, session.messages(42).count }
     assert_raises(Box::Unavailable) { Box.receive(recipient: "unknown@alpha.example.com") { flunk "stored unknown mail" } }
+  end
+
+  def test_with_recipient_persists_host_email_without_action_mailbox
+    refute defined?(::ActionMailbox::InboundEmail)
+    raw = "Subject: saved\r\n\r\nbinary\x00\xff".b
+    %w[alpha beta].each do |key|
+      receipt = Box.with_recipient(recipient: "SUPPORT@#{key.upcase}.EXAMPLE.COM") do |destination|
+        assert_equal key, Email::Tenancy.require_context!
+        assert_equal key, ServiceTenantRecord.current_shard.to_s
+        assert_equal 42, destination.mailbox_id
+        assert_equal "customer:42", destination.owner_ref
+        assert destination.frozen?
+        assert_raises(FrozenError) { destination.recipient.replace("other@example.com") }
+        assert_raises(FrozenError) { destination.owner_ref << "changed" }
+        ServiceEmailReceipt.create!(mailbox_id: destination.mailbox_id,
+          recipient: destination.recipient, raw: raw).id
+      end
+      Box.for_tenant(key) do |session|
+        saved = ServiceEmailReceipt.find(receipt)
+        assert_equal raw, saved.raw
+        assert_equal "support@#{key}.example.com", saved.recipient
+        assert_equal 1, ServiceEmailReceipt.count
+        assert_equal 0, session.messages(42).count
+      end
+    end
+    assert_nil Email::Tenancy.current_key
+  end
+
+  def test_lookup_restores_nested_context_and_does_not_wrap_host_errors
+    Box.for_tenant("alpha") do
+      assert_equal :host_result, Box.with_recipient(recipient: "support@beta.example.com") { :host_result }
+      assert_equal "alpha", Email::Tenancy.require_context!
+      assert_equal "alpha", ServiceTenantRecord.current_shard.to_s
+      error = assert_raises(ActiveRecord::RecordNotFound) do
+        Box.with_recipient(recipient: "support@beta.example.com") { raise ActiveRecord::RecordNotFound, "host record missing" }
+      end
+      assert_equal "host record missing", error.message
+      assert_equal "alpha", Email::Tenancy.require_context!
+      assert_equal "alpha", ServiceTenantRecord.current_shard.to_s
+    end
+    assert_nil Email::Tenancy.current_key
+    assert_raises(ArgumentError) { Box.with_recipient(recipient: "support@alpha.example.com") }
+  end
+
+  def test_lookup_rejects_inactive_destinations_before_host_persistence
+    assert_raises(Box::Unavailable) { Box.with_recipient(recipient: "support@unknown.example.com") { flunk } }
+    Box.for_tenant("alpha") do |session|
+      address = session.add_address(42, address: "pending@alpha.example.com")
+      assert_raises(Box::Unavailable) { Box.with_recipient(recipient: address.address) { flunk } }
+      session.activate_address!(address.id, evidence: "test")
+      snapshot = Box.with_recipient(recipient: address.address) { |destination| destination }
+      assert_equal address.id, snapshot.address_id
+      assert_equal address.receiving_domain_id, snapshot.receiving_domain_id
+      session.suspend_address(42, address.id)
+      assert_raises(Box::Unavailable) { Box.with_recipient(recipient: address.address) { flunk } }
+      session.suspend(42)
+      assert_raises(Box::Unavailable) { Box.with_recipient(recipient: "support@alpha.example.com") { flunk } }
+      session.resume(42)
+    end
+    Box::ReceivingDomain.find_by!(domain: "alpha.example.com").update!(state: "suspended")
+    assert_raises(Box::Unavailable) { Box.with_recipient(recipient: "support@alpha.example.com") { flunk } }
+    assert_nil Email::Tenancy.current_key
+  end
+
+  def test_receive_yields_destination_and_rolls_back_host_failures
+    assert_raises(ActiveRecord::RecordNotFound) do
+      Box.receive(recipient: "support@alpha.example.com") do |destination|
+        assert_equal "alpha", destination.tenant_key
+        ServiceEmailReceipt.create!(mailbox_id: destination.mailbox_id, raw: "raw")
+        raise ActiveRecord::RecordNotFound, "host failure"
+      end
+    end
+    Box.for_tenant("alpha") do |session|
+      assert_equal 0, ServiceEmailReceipt.count
+      assert_equal 0, session.messages(42).count
+    end
+  end
+
+  def test_receive_preserves_zero_argument_lambda_callbacks
+    inbound = Struct.new(:id).new(101)
+    assert_equal inbound, Box.receive(recipient: "support@alpha.example.com", &-> { inbound })
+    Box.for_tenant("alpha") { |session| assert_equal 1, session.messages(42).count }
+  end
+
+  def test_lookup_never_provisions_a_missing_tenant
+    directory = Box.register_domain(domain: "missing.example.com", tenant_key: "missing", account_id: "shared")
+    Box.activate_domain!(directory.id, evidence: "test directory entry")
+    before = Dir.children(SERVICE_ROOT).sort
+    assert_raises(ActiveRecord::ConnectionNotEstablished) do
+      Box.with_recipient(recipient: "support@missing.example.com") { flunk "entered missing tenant" }
+    end
+    assert_equal before, Dir.children(SERVICE_ROOT).sort
+    assert_nil Email::Tenancy.current_key
   end
 
   def test_overlapping_ids_and_operation_names_remain_isolated

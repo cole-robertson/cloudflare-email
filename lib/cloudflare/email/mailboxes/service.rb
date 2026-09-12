@@ -4,6 +4,16 @@ require "cloudflare/email/envelope"
 module Cloudflare
   module Email
     module Mailboxes
+      # A routing snapshot, not a model or an authorization token. Use it inside
+      # the yielded tenant context; later jobs must resolve/check policy again.
+      Destination = Struct.new(:tenant_key, :mailbox_id, :address_id,
+        :receiving_domain_id, :recipient, :owner_ref, keyword_init: true) do
+        def initialize(**attributes)
+          super(**attributes.transform_values { |value| value.is_a?(String) ? value.dup.freeze : value })
+          freeze
+        end
+      end
+
       class << self
         # Call after host authorization. The directory is a control-plane API,
         # not a public endpoint accepting arbitrary customer domain claims.
@@ -27,16 +37,23 @@ module Cloudflare
 
         # Only call after verifying the complete ingress HMAC. Resolve before
         # ActionMailbox or ActiveStorage accesses a tenant connection.
-        def receive(recipient:)
-          raise ArgumentError, "persistence block required" unless block_given?
-          address = canonical_address(recipient)
-          directory = ReceivingDomain.find_by(domain: address.split("@", 2).last, state: "active")
-          raise Unavailable, "receiving domain unavailable" unless directory
-          for_tenant(directory.tenant_key) do |session|
-            session.receive(address, directory) { yield }
+        def receive(recipient:, &block)
+          raise ArgumentError, "persistence block required" unless block
+          in_recipient_tenant(recipient) do |session, address, directory|
+            session.receive(address, directory) do |destination|
+              # Preserve strict callbacks accepted before destinations were yielded.
+              block.lambda? && block.arity.zero? ? block.call : block.call(destination)
+            end
           end
-        rescue ::ActiveRecord::RecordNotFound
-          raise Unavailable, "mailbox address unavailable"
+        end
+
+        # Lookup only: the host owns persistence and the block's return value.
+        # Verify ingress before calling this API. No ActionMailbox is required.
+        def with_recipient(recipient:)
+          raise ArgumentError, "a block is required" unless block_given?
+          in_recipient_tenant(recipient) do |session, address, directory|
+            session.with_recipient(address, directory) { |destination| yield destination }
+          end
         end
 
         def canonical_address(value)
@@ -44,6 +61,17 @@ module Cloudflare
             raise ValidationError, "mailbox address must be an ASCII dot-atom address"
           end
           value.downcase
+        end
+
+        private
+
+        def in_recipient_tenant(recipient)
+          address = canonical_address(recipient)
+          directory = ReceivingDomain.find_by(domain: address.split("@", 2).last, state: "active")
+          raise Unavailable, "receiving domain unavailable" unless directory
+          for_tenant(directory.tenant_key) do |session|
+            yield session, address, directory
+          end
         end
       end
 
@@ -237,18 +265,33 @@ module Cloudflare
           context!
           ensure_storage_connection! if defined?(::ActionMailbox::InboundEmail)
           Mailbox.transaction do
-            destination = Address.where(tenant_key: tenant_key, address: address, receiving_domain_id: directory.id, state: "active").first
-            raise Unavailable, "mailbox address unavailable" unless destination
-            mailbox = active_mailbox!(destination.mailbox_id)
-            active_domain!(destination)
-            inbound = yield
-            Message.create_or_find_by!(tenant_key: tenant_key, mailbox_id: mailbox.id,
+            destination = resolve_destination(address, directory)
+            inbound = yield destination
+            Message.create_or_find_by!(tenant_key: tenant_key, mailbox_id: destination.mailbox_id,
               inbound_email_id: inbound.id) { |row| row.recipient = address } if inbound
             inbound
           end
         end
 
+        def with_recipient(address, directory)
+          context!
+          yield resolve_destination(address, directory)
+        end
+
         private
+
+        def resolve_destination(address, directory)
+          destination = Address.where(tenant_key: tenant_key, address: address,
+            receiving_domain_id: directory.id, state: "active").first
+          raise Unavailable, "mailbox address unavailable" unless destination
+          mailbox = active_mailbox!(destination.mailbox_id)
+          active_domain!(destination)
+          Destination.new(tenant_key: tenant_key, mailbox_id: mailbox.id,
+            address_id: destination.id, receiving_domain_id: directory.id,
+            recipient: address, owner_ref: mailbox.owner_ref)
+        rescue ::ActiveRecord::RecordNotFound
+          raise Unavailable, "mailbox address unavailable"
+        end
 
         def context!
           raise ConfigurationError, "mailbox session used outside its tenant context" unless Tenancy.require_context! == tenant_key

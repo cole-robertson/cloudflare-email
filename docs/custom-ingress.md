@@ -44,10 +44,12 @@ class InboundEmailsController < ActionController::API
 
     Cloudflare::Email::Mailboxes.receive(
       recipient: verified.envelope.fetch("to")
-    ) do
+    ) do |destination|
       # This block runs in the recipient's tenant. Apply your sender/review
       # policy here, before persistence schedules Action Mailbox routing.
       # Your policy may raise a host error or return nil instead of persisting.
+      # destination.owner_ref identifies your site/team; validate it using
+      # your application's policy in this tenant context.
       verified.persist_action_mailbox!
     end
 
@@ -65,6 +67,83 @@ Do not use the MIME `To` header or an unauthenticated URL subdomain to select st
 `persist_action_mailbox!` stores the verified raw bytes and metadata in Action Mailbox. The receiving block adds mailbox membership in the same tenant transaction. Rails schedules normal routing after the transaction commits. Apply policies that must stop processing before calling persistence; a check performed after receiving returns can be too late.
 
 For an application that owns a different raw-email store, use `verified.body`, `verified.envelope`, `verified.provider_metadata`, `verified.message_checksum`, and `verified.storage_metadata` with your own persistence/transaction system. `Mailboxes.receive` specifically expects an Action Mailbox inbound email record (or nil) from its block; do not pass an unrelated processing record. The gem does not choose your archive retention, held-message model, or document queue.
+
+## Persist the email and link your business record
+
+Email persistence remains part of the gem's supported path. Action Mailbox stores
+the raw MIME using Active Storage, the verifier saves authenticated metadata, and
+`Mailboxes.receive` adds the inbox membership. Your processing/review record can
+refer to that email rather than storing a second copy of its raw content:
+
+```ruby
+Cloudflare::Email::Mailboxes.receive(
+  recipient: verified.envelope.fetch("to")
+) do |destination|
+  # Validate owner_ref and sender policy here, before any routing is scheduled.
+  inbound = verified.persist_action_mailbox!
+  if inbound
+    # Example host model, on the SAME tenant connection as the gem records.
+    EmailIntake.create!(
+      inbound_email_id: inbound.id,
+      mailbox_id: destination.mailbox_id,
+      owner_ref: destination.owner_ref
+    )
+  end
+  inbound # Return the ActionMailbox record; duplicate deliveries return nil.
+end
+```
+
+The database writes commit together. A host failure rolls back the new email,
+membership and host link and prevents the routing job from being enqueued. This
+does not make an R2 archive, another database, or external API calls transactional.
+Host exceptions propagate; only unavailable registry destinations are translated
+to `Mailboxes::Unavailable`. Existing blocks without a destination argument still
+work.
+
+Persisting through ActionMailbox schedules its normal routing after commit. Put
+your processing in that route or a deliberately coordinated job pipeline. If an
+email must be held, implement a routing policy that cannot process it before
+approval; storing it is not itself a review gate. A routing job failure also needs
+normal job retry/recovery. Receipt deduplication does not make every downstream
+business side effect idempotent.
+
+Managed mailbox membership protects raw email from ActionMailbox's normal
+automatic incineration. Archiving a mailbox message keeps its content; deliberate
+purging can remove it once no other membership references the email. Raw email
+saved without membership follows the normal ActionMailbox lifecycle. Keep host
+references, backup and R2 retention consistent with your chosen deletion policy.
+Multi-tenancy remains opt-in.
+
+## Resolve an address with your own persistence
+
+If your application already owns its raw-email store, use the standalone API:
+
+```ruby
+Cloudflare::Email::Mailboxes.with_recipient(
+  recipient: verified.envelope.fetch("to")
+) do |destination|
+  # Example host-owned persistence service; it must commit durably before ACK.
+  ExistingEmailStore.save!(
+    tenant_key: destination.tenant_key,
+    mailbox_id: destination.mailbox_id,
+    recipient: destination.recipient,
+    raw: verified.body,
+    metadata: verified.storage_metadata
+  )
+end
+```
+
+This checks the active domain, address and mailbox, enters the configured tenant,
+and yields an immutable `Destination` with `tenant_key`, `mailbox_id`, `address_id`,
+`receiving_domain_id`, `recipient` and `owner_ref`. It returns the block's result,
+creates no email or membership, starts no storage transaction, and requires no
+ActionMailbox. Configure the optional mailbox registry and tenant adapter as usual.
+
+Both APIs must be called after complete request verification. Destination values
+are routing snapshots, not authorization tokens: an owner reference does not
+prove a site still exists or that a sender may submit to it. Use records inside
+their tenant context and recheck lifecycle/permissions when later work requires
+it. Both APIs restore the previous tenant context when the block returns or raises.
 
 ## Carry Worker metadata with authenticated provenance
 
