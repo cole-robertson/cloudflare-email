@@ -91,7 +91,14 @@ class TenantFoundationTest < Minitest::Test
   end
 
   def test_requires_explicit_context_even_if_host_defaults_to_a_tenant
-    assert_raises(Cloudflare::Email::ConfigurationError) { Receipt.count }
+    error = assert_raises(Cloudflare::Email::ActiveRecord::TenantConnectionUnavailable) { Receipt.count }
+    assert_kind_of ActiveRecord::ConnectionNotEstablished, error
+    assert_kind_of Cloudflare::Email::ConfigurationError, error.cause
+    # Construction can reach either guard: cold attributes need a pool first,
+    # while cached attributes reach the record's init_internals guard directly.
+    Tenancy.with("alpha") { Receipt.reset_column_information }
+    assert_raises(Cloudflare::Email::ActiveRecord::TenantConnectionUnavailable) { Receipt.new }
+    Tenancy.with("alpha") { Receipt.new }
     assert_raises(Cloudflare::Email::ConfigurationError) { Receipt.new }
     assert_raises(Cloudflare::Email::ConfigurationError) { Tenancy.require_context! }
   end
@@ -116,7 +123,7 @@ class TenantFoundationTest < Minitest::Test
   def test_host_switch_cannot_silently_override_selected_tenant
     Tenancy.with("alpha") do
       TenantRecord.connected_to(role: :writing, shard: :beta) do
-        assert_raises(Cloudflare::Email::ConfigurationError) { Receipt.count }
+        assert_raises(Cloudflare::Email::ActiveRecord::TenantConnectionUnavailable) { Receipt.count }
       end
     end
   end
@@ -125,7 +132,7 @@ class TenantFoundationTest < Minitest::Test
     %i[EventReceipt OutboundDelivery OutboundRecipient OutboundReconciliation].each do |name|
       klass = Cloudflare::Email::ActiveRecord.const_get(name)
       assert klass < TenantRecord
-      assert_raises(Cloudflare::Email::ConfigurationError) { klass.connection_pool }
+      assert_raises(Cloudflare::Email::ActiveRecord::TenantConnectionUnavailable) { klass.connection_pool }
     end
   end
 

@@ -97,7 +97,7 @@ class ActualTenantedMailboxTest < Minitest::Test
     Tenancy.with("beta") do
       assert_raises(Cloudflare::Email::ConfigurationError) { records[0].reload }
     end
-    assert_raises(Cloudflare::Email::ConfigurationError) { Mailboxes::Mailbox.count }
+    assert_raises(Cloudflare::Email::ActiveRecord::TenantConnectionUnavailable) { Mailboxes::Mailbox.count }
     assert_raises(RuntimeError) { Tenancy.with("alpha") { raise "callback failed" } }
     assert_nil TenantRecord.current_tenant
     assert_nil Tenancy.current_key
