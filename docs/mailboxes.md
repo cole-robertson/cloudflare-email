@@ -34,7 +34,8 @@ require "cloudflare/email/mailboxes"
 Loading this module enables mailbox lookup on the gem's Cloudflare ingress.
 Existing receiving addresses must be registered and activated before switching
 an existing application over. Unregistered or suspended destinations return
-HTTP 422 and the Worker rejects the delivery; there is no default-mailbox fallback.
+HTTP 422 and the Worker rejects the delivery by default. You can explicitly
+configure a domain catch-all below when your application needs that behavior.
 
 For separate organization databases, follow the
 [activerecord-tenanted setup](activerecord-tenanted.md) **before loading the
@@ -145,6 +146,67 @@ Addresses use lowercase ASCII dot-atom local parts and domains. Alias addresses
 are explicit: the module does not automatically strip `+tags` or invent address
 fallbacks. Reserve application-specific names such as Rebulk's `tracking` in
 your mailbox-management policy before creation.
+
+## Receive unregistered local parts with an optional catch-all
+
+Catch-all receiving is **off by default** and is available in the unreleased
+version. It lets one existing address receive otherwise unregistered addresses
+on its exact domain, without creating an alias row for each incoming local part.
+For example, `anything@acme.example.com` can arrive in an existing support mailbox.
+It does not cover subdomains such as `anything@other.acme.example.com`.
+
+Fresh installations include the schema. For an existing installation, generate
+the optional upgrade and apply it to the database containing your mailbox tables:
+
+```sh
+bin/rails generate cloudflare:email:mailboxes:catch_all
+bin/rails db:migrate
+```
+
+With separate tenant databases, pass
+`--tenant-migrations-path=db/tenant_migrate` and run your application's tenant
+migration command for every affected tenant. Updating the gem alone keeps older
+schemas working with exact-address routing. Enabling a catch-all without its
+migration raises a configuration error.
+
+First configure and verify the domain's catch-all Email Routing rule in Cloudflare
+to send mail to your Worker. Then use your authorized provisioning code:
+
+```ruby
+Cloudflare::Email::Mailboxes.for_tenant("organization-123") do |account|
+  mailbox = account.mailboxes.find_by!(owner_ref: "team:42")
+  address = account.addresses(mailbox.id).find_by!(address: "support@acme.example.com")
+  account.enable_catch_all(address.id,
+    evidence: "Domain catch-all Worker route verified in setup ticket 57")
+
+  # Later, stop accepting unregistered local parts:
+  # account.disable_catch_all(address.id)
+end
+```
+
+The address, mailbox and receiving domain must be active before enabling it.
+The evidence is an operator assertion, as with ordinary address activation;
+this call does not change Cloudflare rules. Only one active address per domain
+can serve as a catch-all. A database constraint also protects concurrent changes.
+Suspending that address pauses fallback. If another catch-all is enabled while
+it is suspended, disable the old flag before reactivating the old address.
+
+Exact registered addresses always take precedence. An exact address that is
+pending, suspended, or belongs to a suspended mailbox is rejected; it does not
+fall through to another mailbox. The catch-all also stops receiving when its
+mailbox or domain is suspended.
+
+Both `with_recipient` and `receive` yield `destination.catch_all == true` only
+when fallback was used. `destination.recipient` remains the actual envelope
+recipient, while `address_id` identifies the existing backing address. Stored
+mailbox membership retains that actual recipient too. Apps can use this flag to
+enforce additional rules, such as allowing fallback only while an organization
+has one site, before accepting/persisting the message.
+
+Catch-all receiving grants **no additional sending addresses**. Outbound From,
+Sender and envelope sender must still match an exact active registered address.
+Disable catch-all receiving through the API; the management UI displays its
+configuration but does not enable or disable it.
 
 ## Read incoming mail
 

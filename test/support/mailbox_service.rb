@@ -78,11 +78,12 @@ class MailboxServiceIntegrationTest < Minitest::Test
           ServiceEmailReceipt,
           Email::ActiveRecord::EventReceipt, Email::ActiveRecord::OutboundReconciliation,
           Email::ActiveRecord::OutboundRecipient, Delivery].each(&:delete_all)
-        ServiceTenantRecord.connection.execute("DELETE FROM sqlite_sequence WHERE name = 'cloudflare_email_mailboxes'")
-        ServiceTenantRecord.connection.execute("INSERT INTO sqlite_sequence(name, seq) VALUES ('cloudflare_email_mailboxes', 41)")
         domain = Box.register_domain(domain: "#{key}.example.com", tenant_key: key, account_id: "shared")
         Box.activate_domain!(domain.id, evidence: "operator verified DNS and sending", sending_enabled: true)
-        mailbox = session.create(name: "Support", address: "Support@#{key}.example.com", owner_ref: "customer:42")
+        # Explicit collision fixture is independent of SQLite's sequence state,
+        # including after the old-schema migration/rebuild regression below.
+        mailbox = Box::Mailbox.create!(id: 42, tenant_key: key, name: "Support", owner_ref: "customer:42")
+        session.add_address(mailbox.id, address: "Support@#{key}.example.com")
         @ids[key] = mailbox.id
         session.activate_address!(mailbox.addresses.first.id, evidence: "route verified")
       end
@@ -474,5 +475,139 @@ class MailboxServiceIntegrationTest < Minitest::Test
       assert_empty ActiveJob::Base.queue_adapter.enqueued_jobs
     end
     assert_requested request, times: 1
+  end
+
+  def test_optional_catch_all_preserves_envelope_and_membership_without_alias_rows
+    Box.for_tenant("alpha") do |session|
+      address = session.addresses(42).first
+      refute address.catch_all
+      assert_raises(Box::Unavailable) { Box.with_recipient(recipient: "unknown@alpha.example.com") { flunk } }
+      assert_raises(ArgumentError) { session.enable_catch_all(address.id, evidence: " ") }
+      session.enable_catch_all(address.id, evidence: "Cloudflare catch-all rule checked")
+      assert address.reload.catch_all
+      assert_equal "Cloudflare catch-all rule checked", address.catch_all_evidence
+      exact = Box.with_recipient(recipient: address.address) { |destination| destination }
+      refute exact.catch_all
+      snapshot = Box.with_recipient(recipient: "ANYTHING@ALPHA.EXAMPLE.COM") { |destination| destination }
+      assert snapshot.catch_all
+      assert snapshot.frozen?
+      assert_equal address.id, snapshot.address_id
+      assert_equal "anything@alpha.example.com", snapshot.recipient
+      assert_equal "customer:42", snapshot.owner_ref
+      Box.receive(recipient: "anything@alpha.example.com") { Struct.new(:id).new(911) }
+      assert_equal "anything@alpha.example.com", session.messages(42).first.recipient
+      assert_equal 1, session.addresses(42).count
+      session.disable_catch_all(address.id)
+      assert_raises(Box::Unavailable) { Box.with_recipient(recipient: "anything@alpha.example.com") { flunk } }
+      refute address.reload.catch_all
+      assert_equal "Cloudflare catch-all rule checked", address.catch_all_evidence
+    end
+  end
+
+  def test_exact_addresses_reserve_names_even_when_unavailable
+    Box.for_tenant("alpha") do |session|
+      session.enable_catch_all(session.addresses(42).first.id, evidence: "verified")
+      second = session.create(name: "Explicit", address: "reserved@alpha.example.com", owner_ref: "site:other")
+      exact = second.addresses.first
+      assert_raises(Box::Unavailable) { Box.with_recipient(recipient: exact.address) { flunk } }
+      session.activate_address!(exact.id, evidence: "verified")
+      resolved = Box.with_recipient(recipient: exact.address) { |destination| destination }
+      assert_equal second.id, resolved.mailbox_id
+      refute resolved.catch_all
+      session.suspend_address(second.id, exact.id)
+      assert_raises(Box::Unavailable) { Box.with_recipient(recipient: exact.address) { flunk } }
+      session.activate_address!(exact.id, evidence: "verified")
+      session.suspend(second.id)
+      assert_raises(Box::Unavailable) { Box.with_recipient(recipient: exact.address) { flunk } }
+      assert Box.with_recipient(recipient: "missing@alpha.example.com") { |destination| destination.catch_all }
+    end
+  end
+
+  def test_catch_all_requires_active_ownership_and_cannot_expand_sending_authority
+    Box.for_tenant("alpha") do |session|
+      address = session.addresses(42).first
+      session.suspend_address(42, address.id)
+      assert_raises(ActiveRecord::RecordNotFound) { session.enable_catch_all(address.id, evidence: "verified") }
+      session.activate_address!(address.id, evidence: "verified")
+      session.suspend(42)
+      assert_raises(ActiveRecord::RecordNotFound) { session.enable_catch_all(address.id, evidence: "verified") }
+      session.resume(42)
+      session.enable_catch_all(address.id, evidence: "verified")
+      assert_raises(ActiveRecord::RecordNotFound) do
+        session.prepare(42, operation_key: "unknown-sender", mail: mail(from: "anything@alpha.example.com"))
+      end
+      assert_equal 0, Delivery.count
+      assert session.prepare(42, operation_key: "exact-sender", mail: mail)
+      session.suspend(42)
+      assert_raises(Box::Unavailable) { Box.with_recipient(recipient: "anything@alpha.example.com") { flunk } }
+      session.resume(42)
+      Box::ReceivingDomain.find_by!(tenant_key: "alpha").update!(state: "suspended")
+      assert_raises(Box::Unavailable) { Box.with_recipient(recipient: "anything@alpha.example.com") { flunk } }
+      assert_raises(ActiveRecord::RecordNotFound) { session.enable_catch_all(address.id, evidence: "verified") }
+      session.disable_catch_all(address.id)
+      refute address.reload.catch_all
+    end
+  end
+
+  def test_domain_catch_all_unique_index_prevents_competing_activation_and_resume
+    Box.for_tenant("alpha") do |session|
+      original = session.addresses(42).first
+      second = session.add_address(42, address: "fallback@alpha.example.com")
+      session.activate_address!(second.id, evidence: "verified")
+      session.enable_catch_all(original.id, evidence: "verified")
+      assert_raises(ActiveRecord::RecordInvalid) { session.enable_catch_all(second.id, evidence: "verified") }
+      assert_raises(ActiveRecord::RecordNotUnique) { second.update_columns(catch_all: true, catch_all_evidence: "direct writer") }
+      session.suspend_address(42, original.id)
+      session.enable_catch_all(second.id, evidence: "replacement verified")
+      assert_raises(ActiveRecord::RecordInvalid) { session.activate_address!(original.id, evidence: "old route") }
+      assert_equal "suspended", original.reload.state
+      session.disable_catch_all(original.id)
+      session.activate_address!(original.id, evidence: "exact address restored")
+      resolved = Box.with_recipient(recipient: "unknown@alpha.example.com") { |destination| destination }
+      assert_equal second.id, resolved.address_id
+    end
+  end
+
+  def test_catch_all_is_domain_and_tenant_scoped_with_colliding_mailbox_ids
+    %w[alpha beta].each do |key|
+      Box.for_tenant(key) do |session|
+        session.enable_catch_all(session.addresses(42).first.id, evidence: "verified #{key}")
+      end
+      Box.receive(recipient: "same@#{key}.example.com") do |destination|
+        assert_equal key, destination.tenant_key
+        assert_equal 42, destination.mailbox_id
+        assert destination.catch_all
+        Struct.new(:id).new(922)
+      end
+    end
+    Box.for_tenant("alpha") do |session|
+      assert_equal "same@alpha.example.com", session.messages(42).first.recipient
+      unrelated = Box.register_domain(domain: "other.example.com", tenant_key: "alpha", account_id: "shared")
+      Box.activate_domain!(unrelated.id, evidence: "domain verified")
+      assert_raises(Box::Unavailable) { Box.with_recipient(recipient: "same@other.example.com") { flunk } }
+    end
+    Box.for_tenant("beta") { |session| assert_equal "same@beta.example.com", session.messages(42).first.recipient }
+    assert_nil Email::Tenancy.current_key
+  end
+
+  def test_old_tenant_schema_retains_exact_routing_without_enabling_catch_all
+    Box.for_tenant("alpha") do |session|
+      connection = ServiceTenantRecord.connection
+      connection.remove_index(:cloudflare_email_addresses, name: "idx_cf_email_domain_catch_all")
+      connection.remove_column(:cloudflare_email_addresses, :catch_all)
+      connection.remove_column(:cloudflare_email_addresses, :catch_all_evidence)
+      Box::Address.reset_column_information
+      exact = Box.with_recipient(recipient: "support@alpha.example.com") { |destination| destination }
+      refute exact.catch_all
+      assert_raises(Box::Unavailable) { Box.with_recipient(recipient: "unknown@alpha.example.com") { flunk } }
+      error = assert_raises(Email::ConfigurationError) { session.enable_catch_all(exact.address_id, evidence: "verified") }
+      assert_match(/migrations/, error.message)
+    ensure
+      connection.add_column(:cloudflare_email_addresses, :catch_all, :boolean, default: false, null: false)
+      connection.add_column(:cloudflare_email_addresses, :catch_all_evidence, :text)
+      connection.add_index(:cloudflare_email_addresses, :receiving_domain_id, unique: true,
+        where: "catch_all = TRUE AND state = 'active'", name: "idx_cf_email_domain_catch_all")
+      Box::Address.reset_column_information
+    end
   end
 end

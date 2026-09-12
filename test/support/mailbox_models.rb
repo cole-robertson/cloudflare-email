@@ -99,6 +99,26 @@ class MailboxModelPersistenceTest < Minitest::Test
     assert_raises(ActiveRecord::ReadonlyAttributeError) { address.address = "other@customer.example.com" }
   end
 
+  def test_catch_all_is_off_by_default_and_requires_evidence_and_active_ownership
+    address = create_address
+    refute address.catch_all
+    address.catch_all = true
+    refute address.valid?
+    assert_includes address.errors[:catch_all], "requires an active address"
+    address.state = "active"
+    refute address.valid?
+    assert_includes address.errors[:catch_all_evidence], "is required"
+    address.catch_all_evidence = "operator checked wildcard routing"
+    assert address.valid?
+    address.save!
+    address.update!(state: "suspended")
+    assert address.catch_all
+    @mailbox.update!(state: "suspended")
+    address.state = "active"
+    refute address.valid?
+    assert_includes address.errors[:catch_all], "requires an active mailbox"
+  end
+
   private
 
   def create_address(**overrides)

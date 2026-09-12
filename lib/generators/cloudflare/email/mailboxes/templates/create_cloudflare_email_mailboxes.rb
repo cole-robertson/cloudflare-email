@@ -19,10 +19,14 @@ class CreateCloudflareEmailMailboxes < ActiveRecord::Migration[7.1]
       t.string :address, null: false
       t.string :state, null: false, default: "pending"
       t.text :provisioning_evidence
+      t.boolean :catch_all, null: false, default: false
+      t.text :catch_all_evidence
       t.timestamps
     end
     add_index :cloudflare_email_addresses, :address, unique: true, name: "idx_cf_email_mailbox_address"
     add_index :cloudflare_email_addresses, :mailbox_id, name: "idx_cf_email_address_mailbox"
+    add_index :cloudflare_email_addresses, :receiving_domain_id, unique: true,
+      where: "catch_all = TRUE AND state = 'active'", name: "idx_cf_email_domain_catch_all"
 
     create_table :cloudflare_email_mailbox_messages do |t|
       t.string :tenant_key, null: false
