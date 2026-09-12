@@ -37,6 +37,11 @@ persist through ActionMailbox. Optional v3 signatures authenticate custom Worker
 metadata; your application still decides whether its provenance and sender policy
 are acceptable. The bundled Worker continues to use v2 by default.
 
+`Mailboxes.receive` yields the resolved destination while retaining email and
+membership persistence, so your own processing record can link to the saved mail.
+`Mailboxes.with_recipient` offers the same destination context for applications
+that own their storage. Neither replaces your sender policy or business workflow.
+
 [Read-only routing diagnostics](routing-diagnostics.md) inspect exact-domain DNS
 and the selected Worker route. They distinguish missing configuration from an
 incomplete inspection; a passing snapshot does not prove live email delivery.

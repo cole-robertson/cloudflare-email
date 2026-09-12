@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Add `Mailboxes.with_recipient` for active-address resolution and immutable
+  destination context with host-owned persistence, without ActionMailbox.
+- Yield the same destination from `Mailboxes.receive` so apps can link their
+  business records while retaining gem-managed raw email, metadata and membership
+  persistence. Host exceptions propagate instead of being reported as missing
+  mailbox records; existing no-argument receive blocks continue to work.
+
 - Add a bounded, Rails-independent `Ingress.verify` API for existing ingestion
   pipelines, with optional ActionMailbox persistence and tenant registry routing.
 - Add opt-in v3 signatures for provider metadata supplied by custom Workers.

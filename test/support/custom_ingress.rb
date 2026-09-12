@@ -12,6 +12,7 @@ require "cloudflare/email/engine"
 require "cloudflare/email/tenancy"
 require "cloudflare/email/mailboxes/configuration"
 require "rack/test"
+require "minitest/mock"
 
 CUSTOM_INGRESS_ROOT = Dir.mktmpdir("cf-tenant-ingress")
 ENV["RAILS_ENV"] = "test"
@@ -31,6 +32,8 @@ class MailboxTenantRecord < ActiveRecord::Base
   connects_to shards: %i[alpha beta].to_h { |key|
     [key, { writing: { adapter: "sqlite3", database: "#{CUSTOM_INGRESS_ROOT}/#{key}.sqlite3" } }]
   }
+end
+class HostEmailIntake < MailboxTenantRecord
 end
 Cloudflare::Email::Tenancy.configure(base_class: MailboxTenantRecord,
   switch: ->(key, &block) { MailboxTenantRecord.connected_to(role: :writing, shard: key.to_sym, &block) },
@@ -95,10 +98,17 @@ CreateCloudflareEmailSharedEvents.new.migrate(:up)
   ActiveRecord::Base.establish_connection(adapter: "sqlite3", database: "#{CUSTOM_INGRESS_ROOT}/#{key}.sqlite3")
   [CreateActiveStorageTables, CreateActionMailboxTables, CreateCloudflareEmailOutbox,
    CreateCloudflareEmailEventReceipts, CreateCloudflareEmailMailboxes].each { |migration| migration.new.migrate(:up) }
+  MailboxTenantRecord.connected_to(role: :writing, shard: key.to_sym) do
+    MailboxTenantRecord.connection.create_table(:host_email_intakes) do |table|
+      table.integer :inbound_email_id
+      table.integer :mailbox_id
+      table.string :owner_ref
+    end
+  end
   directory = Cloudflare::Email::Mailboxes.register_domain(domain: "#{key}.example.com", tenant_key: key, account_id: "account")
   Cloudflare::Email::Mailboxes.activate_domain!(directory.id, evidence: "isolated test setup")
   Cloudflare::Email::Mailboxes.for_tenant(key) do |session|
-    box = session.create(name: "Support", address: "support@#{key}.example.com")
+    box = session.create(name: "Support", address: "support@#{key}.example.com", owner_ref: "site:#{key}:42")
     session.activate_address!(box.addresses.first.id, evidence: "isolated test route")
     address = session.add_address(box.id, address: "alias@#{key}.example.com")
     session.activate_address!(address.id, evidence: "isolated test alias")
@@ -118,13 +128,18 @@ class CustomEmailController < ActionController::API
 
     verified = result.message
     held = false
-    Cloudflare::Email::Mailboxes.receive(recipient: verified.envelope.fetch("to")) do
+    Cloudflare::Email::Mailboxes.receive(recipient: verified.envelope.fetch("to")) do |destination|
       # Synthetic host policy; no claim that this is a provider SPF/DMARC API.
       if verified.provider_metadata&.dig("data", "host_review") == true
         held = true
         next nil
       end
-      verified.persist_action_mailbox!
+      inbound = verified.persist_action_mailbox!
+      if inbound
+        HostEmailIntake.create!(inbound_email_id: inbound.id,
+          mailbox_id: destination.mailbox_id, owner_ref: destination.owner_ref)
+      end
+      inbound
     end
     head(held ? :accepted : :created)
   rescue Cloudflare::Email::Mailboxes::Unavailable
@@ -143,6 +158,7 @@ class CustomIngressIntegrationTest < Minitest::Test
     ActiveJob::Base.queue_adapter.enqueued_jobs.clear
     %w[alpha beta].each do |key|
       Email::Mailboxes.for_tenant(key) do
+        HostEmailIntake.delete_all
         Email::Mailboxes::Message.delete_all
         ActionMailbox::InboundEmail.destroy_all
         ActiveStorage::Blob.delete_all
@@ -183,6 +199,9 @@ class CustomIngressIntegrationTest < Minitest::Test
       Email::Mailboxes.for_tenant(tenant) do
         assert_equal 1, Email::Mailboxes::Message.count
         inbound = ActionMailbox::InboundEmail.last
+        intake = HostEmailIntake.find_by!(inbound_email_id: inbound.id)
+        assert_equal Email::Mailboxes::Message.last.mailbox_id, intake.mailbox_id
+        assert_equal "site:#{tenant}:42", intake.owner_ref
         assert_equal raw, inbound.raw_email.download
         assert_equal metadata, Email::ProviderMetadata.for(inbound)
         assert_equal "support@#{tenant}.example.com", Email::Envelope.for(inbound).fetch("to")
@@ -205,6 +224,22 @@ class CustomIngressIntegrationTest < Minitest::Test
       assert_equal 0, ActiveStorage::Blob.count
     end
     assert_empty ActiveJob::Base.queue_adapter.enqueued_jobs.select { |job| job[:job] == ActionMailbox::RoutingJob }
+  end
+
+  def test_host_link_failure_rolls_back_email_membership_and_routing
+    failure = ->(*) { raise ActiveRecord::RecordNotFound, "host site unavailable" }
+    HostEmailIntake.stub(:create!, failure) do
+      assert_raises(ActiveRecord::RecordNotFound) do
+        post_mail("support@alpha.example.com", metadata: metadata)
+      end
+    end
+    Email::Mailboxes.for_tenant("alpha") do
+      assert_equal 0, ActionMailbox::InboundEmail.count
+      assert_equal 0, Email::Mailboxes::Message.count
+      assert_equal 0, HostEmailIntake.count
+    end
+    assert_empty ActiveJob::Base.queue_adapter.enqueued_jobs.select { |job| job[:job] == ActionMailbox::RoutingJob }
+    assert_nil Email::Tenancy.current_key
   end
 
   def test_unsigned_metadata_and_unregistered_addresses_never_persist
@@ -232,6 +267,7 @@ class CustomIngressIntegrationTest < Minitest::Test
     Email::Mailboxes.for_tenant("alpha") do
       assert_equal 3, ActionMailbox::InboundEmail.count
       assert_equal 3, Email::Mailboxes::Message.count
+      assert_equal 3, HostEmailIntake.count
       assert ActionMailbox::InboundEmail.all.all? { |inbound| inbound.raw_email.download == raw }
     end
   end
