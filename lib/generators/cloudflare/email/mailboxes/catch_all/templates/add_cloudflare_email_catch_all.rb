@@ -6,7 +6,7 @@ class AddCloudflareEmailCatchAll < ActiveRecord::Migration[7.1]
     unless column_exists?(:cloudflare_email_addresses, :catch_all_evidence)
       add_column :cloudflare_email_addresses, :catch_all_evidence, :text
     end
-    unless index_exists?(:cloudflare_email_addresses, name: "idx_cf_email_domain_catch_all")
+    unless index_exists?(:cloudflare_email_addresses, :receiving_domain_id, name: "idx_cf_email_domain_catch_all")
       add_index :cloudflare_email_addresses, :receiving_domain_id, unique: true,
         where: "catch_all = TRUE AND state = 'active'", name: "idx_cf_email_domain_catch_all"
     end

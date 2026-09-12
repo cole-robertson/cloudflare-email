@@ -19,7 +19,7 @@ class MailboxGeneratorInstallationTest < Minitest::Test
       assert ActiveRecord::Base.connection.table_exists?(:cloudflare_email_provider_correlations)
       assert ActiveRecord::Base.connection.table_exists?(:cloudflare_email_event_receipts)
       assert ActiveRecord::Base.connection.column_exists?(:cloudflare_email_addresses, :catch_all, :boolean)
-      assert ActiveRecord::Base.connection.index_exists?(:cloudflare_email_addresses, name: "idx_cf_email_domain_catch_all")
+      assert ActiveRecord::Base.connection.index_exists?(:cloudflare_email_addresses, :receiving_domain_id, name: "idx_cf_email_domain_catch_all")
       names = Dir.glob(File.join(dir, "config/initializers/*.rb")).sort.map { |path| File.basename(path) }
       assert_equal "00_cloudflare_email_tenancy.rb", names.first
       # Ruby source in every generated initializer parses successfully.
@@ -65,7 +65,7 @@ class MailboxGeneratorInstallationTest < Minitest::Test
       assert_equal "old@example.com", record.fetch("address")
       assert_equal 0, record.fetch("catch_all")
       assert_nil record.fetch("catch_all_evidence")
-      assert ActiveRecord::Base.connection.index_exists?(:cloudflare_email_addresses, name: "idx_cf_email_domain_catch_all")
+      assert ActiveRecord::Base.connection.index_exists?(:cloudflare_email_addresses, :receiving_domain_id, name: "idx_cf_email_domain_catch_all")
       AddCloudflareEmailCatchAll.new.migrate(:up)
       assert_equal 1, ActiveRecord::Base.connection.select_value("SELECT COUNT(*) FROM cloudflare_email_addresses")
     end
