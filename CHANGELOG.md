@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Allow production Rails schema preloading to boot without a selected tenant.
+  Tenant model pool access still fails closed with
+  `Cloudflare::Email::ActiveRecord::TenantConnectionUnavailable`, an
+  `ActiveRecord::ConnectionNotEstablished` error retaining the original
+  `ConfigurationError` as its cause. No default tenant is selected.
+
 - Add a reusable Worker `relayEmail` pipeline with host backend/header policies,
   bounded raw reads, optional fail-open archive hooks, safe HTTP outcomes and
   deadlines. `archiveEmail` writes raw bytes and envelope metadata to an optional

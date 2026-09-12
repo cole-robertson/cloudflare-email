@@ -4,13 +4,25 @@ require "cloudflare/email/tenancy"
 module Cloudflare
   module Email
     module ActiveRecord
+      # Rails may inspect every model's pool while preloading schema metadata
+      # before any request has selected a tenant. Report an unavailable
+      # connection using Rails' error hierarchy so boot can recover, while
+      # retaining the same fail-closed guard for every caller.
+      class TenantConnectionUnavailable < ::ActiveRecord::ConnectionNotEstablished; end
+
       # Uses the host's abstract tenant connection owner when explicitly configured.
       class Base < Tenancy.model_base(::ActiveRecord::Base)
         self.abstract_class = true
 
         class << self
           def connection_pool
-            Tenancy.require_context! if Tenancy.enabled?
+            if Tenancy.enabled?
+              begin
+                Tenancy.require_context!
+              rescue ConfigurationError => error
+                raise TenantConnectionUnavailable, error.message
+              end
+            end
             super
           end
         end
