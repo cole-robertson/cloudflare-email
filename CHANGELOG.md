@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Add optional domain catch-all receiving on an existing active mailbox address,
+  with explicit verification evidence and a unique active catch-all constraint.
+  Exact registered addresses always win, including rejected inactive addresses;
+  unknown local parts retain their actual envelope recipient without new aliases.
+  Destination snapshots identify fallback, while sending stays exact-address only.
+  A separate generator upgrades existing mailbox schemas; catch-all is never
+  enabled automatically.
+
 - Allow production Rails schema preloading to boot without a selected tenant.
   Tenant model pool access still fails closed with
   `Cloudflare::Email::ActiveRecord::TenantConnectionUnavailable`, an

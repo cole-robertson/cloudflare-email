@@ -78,6 +78,7 @@ module Cloudflare
         validates :address, uniqueness: true, length: { maximum: 254 }
         validates :state, inclusion: { in: %w[pending active suspended] }
         validate :validate_directory
+        validate :validate_catch_all
         validate { validate_parent_tenant(mailbox, :mailbox) }
         scope :active, -> { where(state: "active") }
 
@@ -101,6 +102,22 @@ module Cloudflare
           end
           if new_record? && registered.state != "active"
             errors.add(:receiving_domain_id, "must be active before creating addresses")
+          end
+        end
+
+        def validate_catch_all
+          # Existing exact-address installations need not migrate until they
+          # opt into catch-all receiving.
+          return unless has_attribute?(:catch_all) && self[:catch_all]
+          errors.add(:catch_all_evidence, "is required") if self[:catch_all_evidence].to_s.strip.empty?
+          if will_save_change_to_catch_all? && state != "active"
+            errors.add(:catch_all, "requires an active address")
+          end
+          return unless state == "active"
+          errors.add(:catch_all, "requires an active mailbox") unless mailbox&.state == "active"
+          errors.add(:catch_all, "requires an active receiving domain") unless receiving_domain&.state == "active"
+          if self.class.where(receiving_domain_id: receiving_domain_id, catch_all: true, state: "active").where.not(id: id).exists?
+            errors.add(:catch_all, "already exists for this receiving domain")
           end
         end
       end

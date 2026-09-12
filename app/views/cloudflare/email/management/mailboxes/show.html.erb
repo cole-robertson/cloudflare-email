@@ -53,6 +53,9 @@
           <% receiving = @mailbox.state == "active" && address.state == "active" && address.receiving_domain&.state == "active" %>
           <li class="record-row address-row">
             <span class="record-title"><%= address.address %></span>
+            <% if address.has_attribute?(:catch_all) && address[:catch_all] %>
+              <span class="badge">Domain catch-all configured</span>
+            <% end %>
             <span class="badge"><%= receiving ? "Accepting mail" : address.state == "pending" ? "Pending setup" : "Receiving paused" %></span>
           </li>
         <% end %>

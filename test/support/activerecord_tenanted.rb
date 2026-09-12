@@ -75,7 +75,10 @@ class ActualTenantedMailboxTest < Minitest::Test
     Mailboxes::ReceivingDomain.delete_all
     %w[alpha beta].each do |key|
       Mailboxes::ReceivingDomain.create!(domain: "#{key}.example.com", tenant_key: key, account_id: "account", state: "active")
-      Tenancy.with(key) { Mailboxes::Mailbox.delete_all }
+      Tenancy.with(key) do
+        Mailboxes::Address.delete_all
+        Mailboxes::Mailbox.delete_all
+      end
     end
   end
 
@@ -124,6 +127,29 @@ class ActualTenantedMailboxTest < Minitest::Test
       assert_equal "GlobalID", GlobalID::Locator.locate(gid).name
       without_tenant = gid.to_s.split("?", 2).first
       assert_raises(ActiveRecord::Tenanted::MissingTenantError) { GlobalID::Locator.locate(without_tenant) }
+    end
+  end
+
+  def test_opted_in_catch_all_resolves_in_actual_tenant_and_preserves_exact_blocks
+    %w[alpha beta].each do |key|
+      Mailboxes.for_tenant(key) do |session|
+        mailbox = Mailboxes::Mailbox.create!(id: 123, name: key, tenant_key: key, owner_ref: "site:123")
+        address = session.add_address(mailbox.id, address: "support@#{key}.example.com")
+        session.activate_address!(address.id, evidence: "exact route verified")
+        session.enable_catch_all(address.id, evidence: "domain catch-all verified")
+        pending = session.add_address(mailbox.id, address: "reserved@#{key}.example.com")
+        assert_raises(Mailboxes::Unavailable) { Mailboxes.with_recipient(recipient: pending.address) { flunk } }
+      end
+      Mailboxes.with_recipient(recipient: "new@#{key}.example.com") do |destination|
+        assert_equal key, TenantRecord.current_tenant
+        assert_equal key, destination.tenant_key
+        assert_equal 123, destination.mailbox_id
+        assert destination.catch_all
+        assert_equal "new@#{key}.example.com", destination.recipient
+        assert_equal 2, Mailboxes::Address.count
+      end
+      assert_nil TenantRecord.current_tenant
+      assert_nil Tenancy.current_key
     end
   end
 end

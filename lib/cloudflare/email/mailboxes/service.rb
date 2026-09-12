@@ -7,9 +7,9 @@ module Cloudflare
       # A routing snapshot, not a model or an authorization token. Use it inside
       # the yielded tenant context; later jobs must resolve/check policy again.
       Destination = Struct.new(:tenant_key, :mailbox_id, :address_id,
-        :receiving_domain_id, :recipient, :owner_ref, keyword_init: true) do
+        :receiving_domain_id, :recipient, :owner_ref, :catch_all, keyword_init: true) do
         def initialize(**attributes)
-          super(**attributes.transform_values { |value| value.is_a?(String) ? value.dup.freeze : value })
+          super(**{ catch_all: false }.merge(attributes).transform_values { |value| value.is_a?(String) ? value.dup.freeze : value })
           freeze
         end
       end
@@ -126,6 +126,29 @@ module Cloudflare
           # Failed requests leave the address pending; the existing provisioner
           # upserts a rule, making a deliberate retry safe.
           activate_address!(address.id, evidence: "Cloudflare address rule provisioned for Worker #{worker_name}")
+        end
+
+        # This records the host's verified provider routing decision; it does
+        # not provision Cloudflare DNS/rules or authorize arbitrary From values.
+        def enable_catch_all(address_id, evidence:)
+          context!
+          catch_all_schema!
+          raise ArgumentError, "catch-all route verification evidence is required" if evidence.to_s.strip.empty?
+          Address.transaction do
+            address = Address.where(tenant_key: tenant_key, state: "active").find(address_id)
+            active_mailbox!(address.mailbox_id)
+            active_domain!(address)
+            address.update!(catch_all: true, catch_all_evidence: evidence)
+            address
+          end
+        end
+
+        def disable_catch_all(address_id)
+          context!
+          catch_all_schema!
+          # Disabling is permitted even after suspension; retain the previous
+          # verification evidence for operator inspection.
+          Address.where(tenant_key: tenant_key).find(address_id).tap { |address| address.update!(catch_all: false) }
         end
 
         def suspend(mailbox_id)
@@ -282,19 +305,37 @@ module Cloudflare
 
         def resolve_destination(address, directory)
           destination = Address.where(tenant_key: tenant_key, address: address,
-            receiving_domain_id: directory.id, state: "active").first
-          raise Unavailable, "mailbox address unavailable" unless destination
+            receiving_domain_id: directory.id).first
+          fallback = destination.nil?
+          if fallback && catch_all_schema_available?
+            destination = Address.where(tenant_key: tenant_key, receiving_domain_id: directory.id,
+              catch_all: true, state: "active").first
+          end
+          # An exact pending/suspended address intentionally reserves its name.
+          # It must never fall through to another mailbox's catch-all.
+          raise Unavailable, "mailbox address unavailable" unless destination&.state == "active"
           mailbox = active_mailbox!(destination.mailbox_id)
           active_domain!(destination)
           Destination.new(tenant_key: tenant_key, mailbox_id: mailbox.id,
             address_id: destination.id, receiving_domain_id: directory.id,
-            recipient: address, owner_ref: mailbox.owner_ref)
+            recipient: address, owner_ref: mailbox.owner_ref, catch_all: fallback)
         rescue ::ActiveRecord::RecordNotFound
           raise Unavailable, "mailbox address unavailable"
         end
 
         def context!
           raise ConfigurationError, "mailbox session used outside its tenant context" unless Tenancy.require_context! == tenant_key
+        end
+
+        def catch_all_schema_available?
+          Address.connection.column_exists?(Address.table_name, :catch_all) &&
+            Address.connection.column_exists?(Address.table_name, :catch_all_evidence)
+        end
+
+        def catch_all_schema!
+          unless catch_all_schema_available?
+            raise ConfigurationError, "run cloudflare:email:mailboxes:catch_all migrations for this tenant first"
+          end
         end
 
         def ensure_storage_connection!
