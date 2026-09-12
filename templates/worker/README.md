@@ -139,6 +139,95 @@ supports v3 before enabling metadata in a custom Worker. Keep sensitive provider
 data out of metadata unless your application's retention and access policies
 permit storing it with email records.
 
+## Reuse the transport in an existing Worker
+
+`relayEmail` provides bounded reading, an optional archive, backend selection and
+one HTTP delivery attempt. Your Worker decides how a result maps to SMTP
+rejection, retry, fallback forwarding or logging. It does not call `setReject`
+or `forward` and does not extract or interpret sender authentication evidence.
+The existing default export and `forwardEmail` keep their existing behavior.
+
+```js
+import { relayEmail, archiveEmail, signedEmailHeaders } from "./cloudflare-ingress.js";
+
+export default {
+  async email(message, env) {
+    const outcome = await relayEmail(message, {
+      maxEmailBytes: 25 * 1024 * 1024,
+      timeoutMs: 15_000,
+      archiveTimeoutMs: 10_000,
+      // Omit archive when no bucket is configured. Key policy belongs to your app.
+      archive: env.EMAIL_ARCHIVE ? (args) => archiveEmail({
+        ...args, bucket: env.EMAIL_ARCHIVE,
+        key: `email/${crypto.randomUUID()}.eml`,
+      }) : undefined,
+      accepts: async ({ to }) => to.endsWith("@inbound.example.com"),
+      // Select only host-configured backends; never use a URL from an email header.
+      resolveBackend: async ({ from, to }) => ({
+        url: env.RAILS_INGRESS_URL, secret: env.INGRESS_SECRET,
+      }),
+      headers: ({ raw, from, to, backend }) => signedEmailHeaders({
+        raw, from, to, secret: backend.secret,
+      }),
+    });
+    // Example host policy: permanent rejection only for invalid/unaccepted mail;
+    // throw for delivery failures so Cloudflare can apply its retry behavior.
+    if (outcome.status === "rejected") message.setReject("email not accepted");
+    if (outcome.status === "failed") throw new Error("email relay unavailable");
+  },
+};
+```
+
+The relay reads the original stream once, enforcing the actual byte limit even
+when `rawSize` underreports it. It archives before checking `accepts` and before
+resolving the backend, so an archive can retain mail rejected by host policy.
+Invalid envelopes, unreadable streams and oversized messages are not archived.
+An archive exception or timeout does not prevent delivery: the result has
+`archiveFailed: true`. The archive deadline defaults to 10 seconds and can be
+changed with `archiveTimeoutMs`. It stops waiting but cannot cancel an R2 write:
+a timed-out archive may still finish later if the runtime remains alive. Monitor
+that flag if the archive is your outage recovery mechanism. Other callback
+implementations must finish within the Worker's runtime limits; the `timeoutMs`
+option applies to the HTTP request only.
+
+`accepts` must return exactly `true` to accept. `resolveBackend` returns an object
+with `url` and any additional host configuration needed by `headers`. Backend
+URLs must use HTTPS, or HTTP on localhost, `127.0.0.1` or `[::1]`; embedded
+credentials and fragments are rejected. Generic relay envelope checks enforce
+bounded strings without control characters, leaving address shape to the host.
+`signedEmailHeaders` retains the gem ingress's stricter ASCII address validation.
+
+The `headers` callback receives `{ raw, from, to, backend, archive }`, where
+`archive` is the archive callback's return value, or undefined on omission or
+failure. It can return a header object or `Headers`, including Basic credentials
+for an existing custom endpoint. The relay sends exactly `raw`, follows no
+redirects, cancels response bodies without reading them, and never includes
+backend response content or callback exception text in results. Callbacks are
+trusted host code: preserve the supplied bytes and keep secrets out of logs.
+Do not put an archive key or other per-attempt value into signed provider metadata;
+doing so changes the persisted message identity on retries.
+
+Every result has `status`, `reason` and `archiveFailed`. HTTP responses also add
+`httpStatus`:
+
+| Status | Reasons |
+| --- | --- |
+| `delivered` | `delivered` (HTTP 2xx) |
+| `rejected` | `invalid_envelope`, `too_large`, `not_accepted` |
+| `failed` | `unreadable`, `invalid_options`, `acceptance_failed`, `backend_failed`, `invalid_backend`, `headers_failed`, `timeout`, `fetch_failed`, `http_status` |
+
+All non-2xx responses, including redirects and permanent client errors, return
+`failed`/`http_status`; your host chooses which are permanent, retryable or eligible
+for fallback. The relay never retries on its own.
+
+`archiveEmail({ bucket, key, raw, from, to })` writes raw RFC822 bytes to an R2
+binding and returns `{ key }`. Keys must be nonempty, at most 1,024 UTF8 bytes and
+contain no ASCII control characters. It stores `message/rfc822` content type and
+ASCII-safe `from`, `to` and `size` custom metadata; non-ASCII envelope characters
+become `?` in this display metadata only. Retention, unique keys, archive browsing
+and recovery authorization belong to the host. Rails email persistence starts
+after delivery and does not replace this optional outage archive.
+
 ## Validate changes
 
 ```sh

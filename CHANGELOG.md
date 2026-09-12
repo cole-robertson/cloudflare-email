@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Add a reusable Worker `relayEmail` pipeline with host backend/header policies,
+  bounded raw reads, optional fail-open archive hooks, safe HTTP outcomes and
+  deadlines. `archiveEmail` writes raw bytes and envelope metadata to an optional
+  R2 bucket. Default and custom forwarding share the same HTTP transport.
+- Keep provider authentication interpretation, archive keys, retry decisions and
+  fallback destinations with the host; existing default v2/v3 forwarding remains
+  compatible. Archive deadlines bound waiting but cannot cancel an in-flight write.
+
 - Add `Mailboxes.with_recipient` for active-address resolution and immutable
   destination context with host-owned persistence, without ActionMailbox.
 - Yield the same destination from `Mailboxes.receive` so apps can link their

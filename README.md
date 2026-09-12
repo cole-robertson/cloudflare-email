@@ -19,6 +19,7 @@ Version **0.2.0**. Ruby 3.2+, Rails 7.2–8.1; Ruby 4.0 is tested with Rails 8.1
 | [Management engine (unreleased)](docs/management-engine.md) | Mount an optional server-rendered mailbox UI using your app's authentication |
 | [Custom ingress (unreleased)](docs/custom-ingress.md) | Reuse authentication, signed metadata, and tenant routing in your existing ingestion pipeline |
 | [Routing diagnostics (unreleased)](docs/routing-diagnostics.md) | Inspect exact-domain DNS and Worker routes without changing infrastructure |
+| [Reusable Worker pipeline (unreleased)](templates/worker/README.md#reuse-the-transport-in-an-existing-worker) | Keep custom backend and archive policies while sharing bounded email forwarding |
 | [SQLite tenant databases](docs/activerecord-tenanted.md) | Give each organization its own SQLite database with `activerecord-tenanted` |
 | [Durable outbox](docs/outbox.md) | Detailed setup, callbacks, retries, and recovery |
 | [Delivery events](docs/delivery-events.md) | Cloudflare Queue setup and recipient status tracking |
