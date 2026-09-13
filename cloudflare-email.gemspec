@@ -27,6 +27,7 @@ Gem::Specification.new do |spec|
     "app/views/**/*.erb",
     "lib/cloudflare/email/management/*.css",
     "templates/worker/README.md",
+    "templates/worker/docs/**/*.md",
     "templates/worker/package.json",
     "templates/worker/package-lock.json",
     "templates/worker/scripts/*.mjs",

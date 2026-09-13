@@ -5,6 +5,12 @@ Set `DURABLE_INBOUND_ENABLED = "true"` to replace the bundled Worker's direct HT
 handoff with R2 storage, Queue delivery and scheduled recovery. This is opt-in;
 no Rails model, database, or tenancy setting needs to change.
 
+Upgrade the Rails gem before enabling this mode. New messages without a parseable
+Message-ID use a deterministic fallback for deduplication across Rails hosts.
+Older records created before this change use ActionMailbox's hostname-dependent
+fallback; replaying those historical messages after upgrading can create a new
+record. Reconcile any existing archive backlog before replaying it automatically.
+
 ## Set it up
 
 Create a private R2 bucket and a Queue for each environment:

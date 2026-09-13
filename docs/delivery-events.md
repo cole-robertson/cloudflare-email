@@ -2,6 +2,15 @@
 
 Cloudflare Email Sending can publish outbound lifecycle events to Queues. This is separate from inbound Email Routing and the ActionMailbox ingress.
 
+Mail to a verified Email Routing destination can travel through Routing without
+producing an Email Sending callback. Keep using the recipient's normal address;
+do not interpret a missing callback as failure or resend the message. The optional
+[Routing delivery confirmation](routing-deliveries.md) integration checks
+authenticated analytics for qualifying single-recipient deliveries. It requires
+a separate **Analytics Read + Zone Read** credential and leaves unsupported or
+ambiguous evidence unresolved. Acceptance, receiving-server delivery and a human
+reading the message are different facts.
+
 ## Provision once
 
 1. Create a dedicated Cloudflare Queue for your application's sending events.

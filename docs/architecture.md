@@ -75,7 +75,15 @@ does not automatically provision domains or deploy infrastructure.
 
 Current limitations are deliberate and visible: no provider exactly-once API,
 no automatic resend of uncertain or rejected operations, no multi-provider-ID
-operation (conflicting IDs require review), and no durable inbound Worker buffer.
+operation (conflicting IDs require review). Direct inbound forwarding can reject
+mail during a Rails outage. The optional [durable Worker path](../templates/worker/README.md#durable-inbound-delivery-opt-in)
+commits raw mail and stable envelope context to R2 before returning successfully.
+Queue handoffs and a scheduled recovery pass retry pending mail; a Rails 2xx
+allows removal from the pending store. Queue expiration does not remove R2 mail.
+This boundary requires durable Rails persistence before 2xx, idempotent replay,
+private R2 storage without expiration of pending objects, and operational
+monitoring. It cannot guarantee acceptance when Cloudflare itself cannot store
+the incoming message.
 A prepared operation can be dispatched using its existing identity after a job
 enqueue failure; sending/unknown operations require evidence-based reconciliation.
 Notifications indicate method execution and may run inside an outer transaction;

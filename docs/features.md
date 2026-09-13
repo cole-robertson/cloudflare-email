@@ -31,6 +31,17 @@ a tenant connection adapter. A mailbox tenant key alone does not switch database
 
 ## Upcoming integration tools (unreleased)
 
+[Durable inbound delivery](../templates/worker/README.md#durable-inbound-delivery-opt-in)
+saves raw email and its envelope in R2 before the Worker returns successfully.
+Queues attempt the Rails handoff, and a scheduled pass recovers retained mail
+after enqueue failures or retry exhaustion. Enable it explicitly and provision
+the storage, queue and schedule; existing installations keep direct forwarding.
+
+[Routing delivery confirmation](routing-deliveries.md) adds a read-only provider
+client and optional durable receipts for qualifying single-recipient deliveries
+that appear in Routing analytics. It does not infer outcomes from missing events
+or change whether an accepted email may be sent again.
+
 Existing ingestion pipelines can use [custom ingress](custom-ingress.md) to
 verify bounded raw messages before tenant lookup, keep their own storage, or
 persist through ActionMailbox. Optional v3 signatures authenticate custom Worker
@@ -110,8 +121,9 @@ also does not authorize access to a conversation. Apply your app's permissions
 before displaying mail or sending a reply.
 
 You configure Cloudflare domains/DNS, queue subscriptions, durable jobs,
-monitoring, storage protection and retention. Inbound mail is not durably
-buffered by the Worker during a Rails outage. See [architecture](architecture.md)
+monitoring, storage protection and retention. Direct forwarding does not buffer
+Rails outages; the optional durable inbound setup retains pending mail in R2.
+See [architecture](architecture.md)
 for the full boundary and [security guidance](../SECURITY.md) for deployment.
 
 ## Where to go next

@@ -34,7 +34,7 @@ FROM=hello@mail.example.com TO=you@example.net bin/rails cloudflare:email:send_t
 | Worker reports 408 | Check clock accuracy and the five-minute signing window. |
 | Worker reports 413 or rejects size | Raw MIME exceeds the configured limit. Match `MAX_EMAIL_BYTES` on Rails and Worker and check upstream request limits. |
 | Worker reports 3xx | Point it directly at the final HTTPS ingress URL; redirects are intentionally rejected. |
-| Worker times out | Check Rails availability and request latency. Its upstream request limit is 15 seconds; there is no durable inbound buffer. |
+| Worker times out | Check Rails availability and request latency. Direct mode can reject mail; the optional [durable inbound path](../templates/worker/README.md#durable-inbound-delivery-opt-in) retains it in R2 for retry and scheduled recovery. |
 | Rails returns 200 but your product shows no message | Check ActionMailbox records, job workers, failed routing jobs and your mailbox's `process` method. The default mailbox only logs receipt. |
 | Retrying creates no new inbound record | Identical MIME for the same SMTP recipient is intentionally deduplicated. |
 | Bcc message appears routed to the wrong mailbox | Use `Envelope.for(inbound_email)["to"]` after checking the envelope exists; MIME `To` does not identify every SMTP recipient. |
@@ -85,6 +85,7 @@ the actor you supply but does not authenticate that person.
 | What you see | What to check next |
 | --- | --- |
 | Queue stays empty | Check the Email Sending subscription, sending domain, selected event types and a real send from that domain. |
+| A verified Routing destination received mail but Sending feedback is missing | Use optional [Routing delivery confirmation](routing-deliveries.md) with its separate read credential. Missing evidence is unresolved, not proof of failure; keep the normal recipient address. |
 | Polling fails before processing | Check the queue ID, separate Queues Read/Write token, HTTP pull configuration and configured event handler. |
 | Events process once then stop | `consume_events` is a one-batch task. Schedule it to run repeatedly. |
 | Events stay unmatched | Check account, normalized provider message ID and recipient. Schedule replay; a receipt can arrive before the send result is saved. |

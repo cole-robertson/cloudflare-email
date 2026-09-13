@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- Add opt-in durable inbound delivery: commit original mail and envelope context
+  to R2 before Worker acceptance, deliver queue pointers with fresh signatures,
+  and recover pending mail through a bounded scheduled sweep. Rails errors,
+  lost responses, enqueue failures and exhausted queue retries retain pending
+  mail. Provisioning, protected storage and monitoring remain explicit.
+- Make missing Message-ID fallback deterministic across Rails hosts so replay
+  after a deployment does not create another inbound record. Original MIME and
+  parseable provider Message-IDs remain unchanged.
+- Add optional authenticated Routing analytics delivery confirmation with
+  encrypted immutable receipts, strict single-envelope-recipient correlation,
+  replay and transactional callbacks. Sending acceptance remains unchanged;
+  missing or ambiguous evidence never authorizes a resend.
+- Bound shared sending/queue HTTP responses by streamed bytes and a total
+  per-attempt deadline; disable implicit HTTP retries and sanitize transport
+  failures. Sending and queue acknowledgement ambiguity stays safe to replay
+  through durable receipts rather than resending accepted email.
+- Document verified Routing destinations, separate analytics credentials and
+  explicit system-mail storage with optional SQLite tenancy.
+
 - Add optional domain catch-all receiving on an existing active mailbox address,
   with explicit verification evidence and a unique active catch-all constraint.
   Exact registered addresses always win, including rejected inactive addresses;
