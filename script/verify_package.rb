@@ -62,7 +62,7 @@ Dir.mktmpdir("cloudflare-email-package-") do |temporary|
          File.join(root, "test/support/rails_app.rb"), mode, chdir: root)
   end
   abort "missing packaged durable Worker guide" unless File.file?(File.join(extracted, "templates/worker/docs/durable-inbound.md"))
-  %w[README.md .dev.vars.example package.json package-lock.json wrangler.toml src/index.js].each do |file|
+  %w[README.md .dev.vars.example package.json package-lock.json wrangler.toml src/index.js docs/domain-setup.md scripts/check-subdomains.mjs].each do |file|
     abort "missing packaged deploy template: #{file}" unless File.file?(File.join(extracted, "templates/deploy-to-cloudflare", file))
   end
   abort "packaged deploy Worker differs" unless File.binread(File.join(extracted, "templates/worker/src/index.js")) == File.binread(File.join(extracted, "templates/deploy-to-cloudflare/src/index.js"))

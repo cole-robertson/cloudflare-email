@@ -38,19 +38,39 @@ cron are present. Keep the bucket private with no lifecycle rule expiring
 
 ## 3. Connect an email address
 
+**Choose your address shape:** `acme@in.example.com` on one receiving domain,
+or `invoices@acme.in.example.com` with dynamic organization subdomains.
+Use the [shared domain setup guide](docs/domain-setup.md) for the setup worksheet,
+Cloudflare DNS/routing steps, cited Rebulk example, and verification commands.
+The same Worker serves both; there is no per-organization Worker allowlist.
+
 In Cloudflare, enable Email Routing for the intended receiving domain/subdomain
 and complete its required DNS setup. Add an Email Routing rule for your receiving
-address with **Send to a Worker**, selecting the Worker you just deployed.
+address with **Send to a Worker**, selecting the Worker you just deployed. For
+many local parts, configure the intended domain's catch-all to this Worker once.
 The button does not change your MX records, provision addresses in Rails, or
 replace your existing mailbox provider. Use a receiving subdomain when your apex
 domain's email belongs to Google Workspace or Microsoft 365.
 
 If using the gem's managed mailboxes, register the receiving mailbox/address in
 Rails too. Tenant support and domain catch-all receiving remain explicit choices.
+After verifying a dynamic namespace as described in the guide, register new
+organization domains in Rails without routinely adding provider rules per org.
+Wildcard DNS behavior must be verified on your Cloudflare account; the guide
+distinguishes working Rebulk evidence from Cloudflare's explicit onboarding docs.
 Outbound Email Sending credentials and delivery-event subscriptions are separate
 from this inbound Worker setup.
 
 ## 4. Verify and operate
+
+For dynamic organization subdomains, start with the read-only DNS check:
+
+```sh
+npm run check:subdomains -- --base in.example.com --labels acme,globex
+```
+
+It checks named and fresh labels without API credentials or configuration changes.
+It reports DNS observations only; finish with the real-email checks below.
 
 Send to the configured address and verify that Rails retains and routes it.
 In staging, stop Rails, send another message, confirm it remains in R2, restore
