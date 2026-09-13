@@ -1,17 +1,10 @@
+require "mailbox_kit/management/configuration"
 module Cloudflare
   module Email
     module Management
-      class Configuration
-        attr_accessor :adapter, :back_path
-      end
-
-      def self.configuration
-        @configuration ||= Configuration.new
-      end
-
-      def self.configure
-        yield configuration
-      end
+      Configuration = MailboxKit::Management::Configuration
+      def self.configuration = MailboxKit::Management.configuration
+      def self.configure(&block) = MailboxKit::Management.configure(&block)
     end
   end
 end

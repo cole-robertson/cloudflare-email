@@ -1,0 +1,5 @@
+require "rails/engine"
+require "mailbox-kit"
+require "mailbox_kit/management/adapter"
+require "mailbox_kit/management/configuration"
+require "mailbox_kit/management/engine"

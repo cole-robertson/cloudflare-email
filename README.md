@@ -10,6 +10,11 @@ Deploy the inbound Worker with guided R2/Queue provisioning and secret setup. [P
 
 ## Start here
 
+**On this development branch:** provider-neutral mailbox functionality lives in
+the sibling [Mailbox Kit](mailbox-kit/README.md) gem. Existing Cloudflare setup
+continues to work; the core requires no Cloudflare account. This extraction is not
+part of the published 0.3.0 release yet.
+
 **Sending email?** Start with the [step-by-step Rails guide](docs/getting-started.md).
 **Building a mailbox?** Follow the same guide through receiving, the SQLite-compatible outbox, and delivery tracking.
 **Using plain Ruby?** Jump to [Plain Ruby](#plain-ruby); Rails and a database are optional.

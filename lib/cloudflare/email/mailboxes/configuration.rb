@@ -1,10 +1,10 @@
-require "active_record"
+require "mailbox_kit/mailboxes/configuration"
 require "cloudflare/email/error"
 
 module Cloudflare
   module Email
+    Mailboxes = MailboxKit::Mailboxes unless const_defined?(:Mailboxes, false)
     module Mailboxes
-      class Unavailable < Cloudflare::Email::Error; end
 
       class << self
         def configure(directory_base: ::ActiveRecord::Base, client_resolver: nil)

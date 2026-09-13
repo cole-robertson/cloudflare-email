@@ -1,3 +1,9 @@
+require "mailbox-kit"
+module Cloudflare
+  module Email
+    Mailboxes = MailboxKit::Mailboxes
+  end
+end
 require "cloudflare/email/version"
 require "cloudflare/email/error"
 require "cloudflare/email/response"

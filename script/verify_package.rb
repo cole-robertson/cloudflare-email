@@ -24,6 +24,12 @@ end
 Dir.mktmpdir("cloudflare-email-package-") do |temporary|
   archive = File.join(temporary, "cloudflare-email-#{version}.gem")
   run!(RbConfig.ruby, "-S", "gem", "build", "cloudflare-email.gemspec", "--output", archive, chdir: root)
+  core_archive = File.join(temporary, "mailbox-kit-#{MailboxKit::VERSION}.gem")
+  run!(RbConfig.ruby, "-S", "gem", "build", "mailbox-kit.gemspec", "--output", core_archive, chdir: File.join(root, "mailbox-kit"))
+  core_extracted = File.join(temporary, "core-extracted")
+  Gem::Package.new(core_archive).extract_files(core_extracted)
+  # -I precedes Bundler's source path in fixture subprocesses.
+  ENV["RUBYOPT"] = [ENV["RUBYOPT"], "-I#{File.join(core_extracted, 'lib')}"].compact.join(" ")
   extracted = File.join(temporary, "extracted")
   Gem::Package.new(archive).extract_files(extracted)
 
@@ -31,6 +37,7 @@ Dir.mktmpdir("cloudflare-email-package-") do |temporary|
   cache = File.join(consumer, "vendor/cache")
   FileUtils.mkdir_p(cache)
   FileUtils.cp(archive, cache)
+  FileUtils.cp(core_archive, cache)
   FileUtils.cp(base64_cache, cache)
   File.write(File.join(consumer, "Gemfile"), <<~GEMFILE)
     source "https://rubygems.org"
@@ -49,6 +56,7 @@ Dir.mktmpdir("cloudflare-email-package-") do |temporary|
   RUBY
   Bundler.with_unbundled_env do
     environment = {
+      "RUBYOPT" => nil,
       "BUNDLE_GEMFILE" => File.join(consumer, "Gemfile"),
       "BUNDLE_PATH" => File.join(temporary, "installed"),
       "BUNDLE_FROZEN" => "false", "BUNDLE_DEPLOYMENT" => "false",
@@ -76,4 +84,41 @@ Dir.mktmpdir("cloudflare-email-package-") do |temporary|
   run!({ "CLOUDFLARE_EMAIL_TEST_GEM_ROOT" => extracted }, RbConfig.ruby,
        File.join(root, "test/support/production_tenancy_boot.rb"), chdir: root)
   puts "PASS: packaged production eager boot and fail-closed tenant connections"
+  run!({ "MAILBOX_KIT_ONLY" => "1", "MAILBOX_KIT_EXPECTED_ROOT" => core_extracted }, RbConfig.ruby,
+       File.join(root, "test/support/management_engine.rb"), chdir: root)
+  run!({ "MAILBOX_KIT_EXPECTED_ROOT" => core_extracted }, RbConfig.ruby,
+       File.join(root, "test/support/mailbox_core.rb"), chdir: root)
+  puts "PASS: packaged standalone core routing and Rails management (no Cloudflare loaded)"
+  run!(RbConfig.ruby, File.join(root, "test/support/mailbox_core_tenancy.rb"), chdir: root)
+
+  # A separate Rails consumer has no Cloudflare dependency at all. This catches
+  # accidental reliance on the adapter's dependencies and Rails initializers.
+  core_consumer = File.join(temporary, "core-consumer")
+  FileUtils.mkdir_p(core_consumer)
+  File.write(File.join(core_consumer, "Gemfile"), <<~GEMFILE)
+    source "https://rubygems.org"
+    gem "mailbox-kit", path: #{core_extracted.inspect}
+    gem "rails", "#{Gem.loaded_specs.fetch('rails').version}"
+    gem "sqlite3", "#{Gem.loaded_specs.fetch('sqlite3').version}"
+    gem "json", "< 3"
+    gem "minitest", "~> 5.20"
+    gem "rack-test", "~> 2.1"
+  GEMFILE
+  # The installed archive's file list excludes its development gemspec.
+  core_specification = Gem::Package.new(core_archive).spec
+  File.write(File.join(core_extracted, "mailbox-kit.gemspec"), core_specification.to_ruby)
+  Bundler.with_unbundled_env do
+    environment = {
+      "RUBYOPT" => nil, "BUNDLE_GEMFILE" => File.join(core_consumer, "Gemfile"),
+      "BUNDLE_PATH" => nil, "BUNDLE_FROZEN" => "false", "BUNDLE_DEPLOYMENT" => "false",
+      "MAILBOX_KIT_ONLY" => "1", "MAILBOX_KIT_EXPECTED_ROOT" => core_extracted,
+      "MAILBOX_KIT_ISOLATED" => "1",
+    }
+    run!(environment, RbConfig.ruby, bundle_executable, "install", "--local", "--quiet", chdir: core_consumer)
+    %w[management_engine mailbox_core mailbox_core_tenancy].each do |fixture|
+      run!(environment, RbConfig.ruby, bundle_executable, "exec", RbConfig.ruby,
+        File.join(root, "test/support/#{fixture}.rb"), chdir: core_consumer)
+    end
+  end
+  puts "PASS: independent Rails consumer without cloudflare-email in its bundle"
 end

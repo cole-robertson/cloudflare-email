@@ -4,3 +4,5 @@ gemspec path: ".."
 
 gem "rails", "~> 8.0.0", ">= 8.0.5.1"
 gem "sqlite3", ">= 2.9.6"
+
+gem "mailbox-kit", path: "../mailbox-kit"

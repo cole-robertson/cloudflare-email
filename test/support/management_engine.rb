@@ -1,4 +1,8 @@
-require_relative "../test_helper"
+if ENV["MAILBOX_KIT_ONLY"]
+  require "minitest/autorun"
+else
+  require_relative "../test_helper"
+end
 require "tmpdir"
 require "fileutils"
 require "rails"
@@ -8,8 +12,21 @@ require "action_mailer/railtie"
 require "active_job/railtie"
 require "active_storage/engine"
 require "action_mailbox/engine"
-require "cloudflare/email/mailboxes"
-require "cloudflare/email/management"
+if ENV["MAILBOX_KIT_ONLY"]
+  require "mailbox_kit/mailboxes"
+  require "mailbox_kit/management"
+  if ENV["MAILBOX_KIT_ISOLATED"]
+    abort "isolated core consumer includes Cloudflare" if defined?(Cloudflare) || Gem.loaded_specs.key?("cloudflare-email")
+  end
+  if ENV["MAILBOX_KIT_EXPECTED_ROOT"]
+    abort "core loaded from source" unless MailboxKit::ROOT == ENV.fetch("MAILBOX_KIT_EXPECTED_ROOT")
+  end
+  FixtureEmail = MailboxKit
+else
+  require "cloudflare/email/mailboxes"
+  require "cloudflare/email/management"
+  FixtureEmail = Cloudflare::Email
+end
 require "rack/test"
 require "nokogiri"
 
@@ -47,10 +64,10 @@ class ManagementFixtureLoginController < ActionController::Base
 end
 Rails.application.routes.draw do
   post "/fixture-login", to: "management_fixture_login#create"
-  mount Cloudflare::Email::Management::Engine => "/nested/email"
+  mount FixtureEmail::Management::Engine => "/nested/email"
 end
 
-class ManagementFixtureAdapter < Cloudflare::Email::Management::Adapter
+class ManagementFixtureAdapter < FixtureEmail::Management::Adapter
   class_attribute :denied_actions, default: []
   class_attribute :permitted_domains, default: ["example.test"]
   class_attribute :unscoped_mailboxes, default: false
@@ -62,7 +79,7 @@ class ManagementFixtureAdapter < Cloudflare::Email::Management::Adapter
   def authenticate! = @controller.session[:owner] == "owner-1"
   def tenant_key = "workspace"
   def mailboxes(session)
-    scope = self.class.unscoped_mailboxes ? Cloudflare::Email::Mailboxes::Mailbox.all : session.mailboxes
+    scope = self.class.unscoped_mailboxes ? FixtureEmail::Mailboxes::Mailbox.all : session.mailboxes
     scope.where(owner_ref: @controller.session[:owner])
   end
   def allowed?(action, mailbox = nil) = !self.class.denied_actions.include?(action.to_sym)
@@ -87,16 +104,24 @@ ActiveRecord::Migration.verbose = false
 %w[activestorage actionmailbox].each do |name|
   Dir["#{Gem.loaded_specs.fetch(name).full_gem_path}/db/migrate/*.rb"].each { |path| require path }
 end
+if ENV["MAILBOX_KIT_ONLY"]
+  require "generators/mailbox_kit/install/templates/create_mailbox_kit_receiving_domains"
+  require "generators/mailbox_kit/install/templates/create_mailbox_kit_mailboxes"
+  [CreateActiveStorageTables, CreateActionMailboxTables, CreateMailboxKitReceivingDomains,
+   CreateMailboxKitMailboxes].each { |migration| migration.new.migrate(:up) }
+  abort "core loaded Cloudflare adapter" if $LOADED_FEATURES.any? { |path| path.end_with?("/cloudflare-email.rb", "/cloudflare/email/client.rb") }
+else
 %w[outbox/templates/create_cloudflare_email_outbox tracking/templates/create_cloudflare_email_event_receipts
    mailboxes/templates/create_cloudflare_email_receiving_domains mailboxes/templates/create_cloudflare_email_mailboxes
    mailboxes/templates/create_cloudflare_email_shared_events].each { |path| require "generators/cloudflare/email/#{path}" }
 [CreateActiveStorageTables, CreateActionMailboxTables, CreateCloudflareEmailOutbox,
  CreateCloudflareEmailEventReceipts, CreateCloudflareEmailReceivingDomains,
  CreateCloudflareEmailSharedEvents, CreateCloudflareEmailMailboxes].each { |migration| migration.new.migrate(:up) }
+end
 
 class ManagementEngineIntegrationTest < Minitest::Test
   include Rack::Test::Methods
-  Email = Cloudflare::Email
+  Email = FixtureEmail
   PREFIX = "/nested/email"
   def app = Rails.application
 
@@ -131,6 +156,25 @@ class ManagementEngineIntegrationTest < Minitest::Test
 
   def with_session(&block) = Email::Mailboxes.for_tenant("workspace", &block)
   def mailbox_path(mailbox = @owned) = "#{PREFIX}/mailboxes/#{mailbox.id}"
+
+  def test_raw_mail_is_retained_until_explicit_purge
+    member, inbound = incoming(@owned)
+    with_session do |session|
+      inbound.incinerate
+      assert ActionMailbox::InboundEmail.exists?(inbound.id)
+      session.purge_message(@owned.id, member.id)
+      refute ActionMailbox::InboundEmail.exists?(inbound.id)
+    end
+  end
+
+  def test_framework_jobs_capture_context_and_allow_single_database_work
+    with_session do
+      payload = ActionMailbox::RoutingJob.new.serialize
+      assert_equal "workspace", payload.fetch("cloudflare_email_tenant_key")
+      assert_equal "workspace", ActiveStorage::PurgeJob.new.serialize.fetch("cloudflare_email_tenant_key")
+    end
+    refute ActionMailbox::RoutingJob.new.serialize.key?("cloudflare_email_tenant_key")
+  end
   def html = Nokogiri::HTML(last_response.body)
 
   def token(path = "#{PREFIX}/mailboxes")

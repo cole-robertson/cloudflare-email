@@ -2,3 +2,5 @@
 eval_gemfile File.expand_path("../Gemfile", __dir__)
 gem "rackup", "~> 2.3"
 gem "webrick", "~> 1.9"
+
+gem "mailbox-kit", path: "../mailbox-kit"

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Extract provider-neutral mailbox storage, recipient routing, optional tenancy,
+  raw-message retention, Rails job context and the server-rendered UI into the
+  sibling `mailbox-kit` gem. Cloudflare APIs, Worker transport, sending outbox and
+  delivery feedback remain in `cloudflare-email`. Preserve existing table names,
+  public constants, job payload keys and mounted Cloudflare engine routes.
+  See [Mailbox Kit](mailbox-kit/README.md) for standalone setup and release order.
+
 - Add a cited one-time domain setup guide for both receiving domains and dynamic
   organization subdomains, shared between Worker templates. Add a read-only
   `npm run check:subdomains` DNS helper with named/fresh probes and explicit limits
