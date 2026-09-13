@@ -6,8 +6,8 @@ module Cloudflare
     # `bin/rails cloudflare:email:deploy_worker` — uploads the Worker
     # script + both secrets via the Cloudflare API. No wrangler required.
     class DeployWorkerTask < TaskBase
-      def self.call(script_path: nil, ingress_url: nil, io: $stdout)
-        new(io: io, script_path: script_path, ingress_url: ingress_url).call
+      def self.call(script_path: nil, ingress_url: nil, delivery_mode: "durable", io: $stdout)
+        new(io: io, script_path: script_path, ingress_url: ingress_url, delivery_mode: delivery_mode).call
       end
 
       protected
@@ -28,7 +28,7 @@ module Cloudflare
         )
 
         say "  Deploying Worker '#{deployer.script_name}'..."
-        deployer.deploy(script_path: path)
+        deployer.deploy(script_path: path, delivery_mode: opts[:delivery_mode])
         say "  ✓ Worker script deployed"
 
         deployer.put_secret("INGRESS_SECRET", ingress_secret)

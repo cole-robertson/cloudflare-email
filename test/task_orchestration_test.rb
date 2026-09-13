@@ -16,6 +16,11 @@ class TaskOrchestrationTest < Minitest::Test
       ingress_secret: "synthetic-ingress-secret", queues_token: "queues-token", event_queue_id: "events" }
     @previous_env = Rails.env
     Rails.env = "staging"
+    management_request(:get, "#{script_path}/settings").to_return(success("bindings" => [
+      { "name" => "INBOUND_EMAIL_STORE", "type" => "r2_bucket" },
+      { "name" => "INBOUND_EMAIL_QUEUE", "type" => "queue" },
+    ]))
+    management_request(:get, "#{script_path}/schedules").to_return(success("schedules" => [{ "cron" => "* * * * *" }]))
   end
 
   def teardown

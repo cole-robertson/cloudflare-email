@@ -15,7 +15,8 @@ namespace :cloudflare do
     desc "Deploy the Worker via Cloudflare API. URL=https://... sets RAILS_INGRESS_URL; SCRIPT=path overrides the Worker source"
     task deploy_worker: :environment do
       require "cloudflare/email/deploy_worker_task"
-      exit Cloudflare::Email::DeployWorkerTask.call(ingress_url: ENV["URL"], script_path: ENV["SCRIPT"])
+      exit Cloudflare::Email::DeployWorkerTask.call(ingress_url: ENV["URL"], script_path: ENV["SCRIPT"],
+        delivery_mode: ENV.fetch("INBOUND_DELIVERY_MODE", "durable"))
     end
 
     desc "Create Cloudflare Email Routing rule: ADDRESS=addr@domain → env-scoped Worker (WORKER=name to override)"

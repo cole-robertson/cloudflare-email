@@ -76,7 +76,7 @@ does not automatically provision domains or deploy infrastructure.
 Current limitations are deliberate and visible: no provider exactly-once API,
 no automatic resend of uncertain or rejected operations, no multi-provider-ID
 operation (conflicting IDs require review). Direct inbound forwarding can reject
-mail during a Rails outage. The optional [durable Worker path](../templates/worker/README.md#durable-inbound-delivery-opt-in)
+mail during a Rails outage. The default [durable Worker path](../templates/worker/README.md#durable-inbound-delivery)
 commits raw mail and stable envelope context to R2 before returning successfully.
 Queue handoffs and a scheduled recovery pass retry pending mail; a Rails 2xx
 allows removal from the pending store. Queue expiration does not remove R2 mail.

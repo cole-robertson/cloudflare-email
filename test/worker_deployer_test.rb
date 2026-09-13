@@ -89,6 +89,38 @@ class WorkerDeployerTest < Minitest::Test
     tmp&.unlink
   end
 
+  def test_durable_deploy_refuses_missing_infrastructure_before_upload
+    stub_request(:get, "#{script_url}/settings").to_return(status: 404, body: '{"success":false}')
+    error = assert_raises(Cloudflare::Email::ConfigurationError) do
+      make_deployer.deploy(source: "export default {}", delivery_mode: "durable")
+    end
+    assert_includes error.message, "Wrangler first"
+    assert_not_requested :put, script_url
+  end
+
+  def test_durable_deploy_requires_recovery_schedule
+    stub_request(:get, "#{script_url}/settings").to_return(status: 200, body: JSON.generate(
+      success: true, result: { bindings: [{ name: "INBOUND_EMAIL_STORE", type: "r2_bucket" },
+        { name: "INBOUND_EMAIL_QUEUE", type: "queue" }] },
+    ))
+    stub_request(:get, "#{script_url}/schedules").to_return(status: 200, body: '{"success":true,"result":{"schedules":[]}}')
+    assert_raises(Cloudflare::Email::ConfigurationError) do
+      make_deployer.deploy(source: "export default {}", delivery_mode: "durable")
+    end
+    assert_not_requested :put, script_url
+  end
+
+  def test_direct_fallback_is_explicit_and_preserves_recovery_bindings
+    stub = stub_request(:put, script_url).with do |req|
+      assert_includes req.body, '"keep_bindings":["secret_text","plain_text","r2_bucket","queue"]'
+      assert_includes req.body, '"name":"INBOUND_DELIVERY_MODE","text":"direct"'
+      true
+    end.to_return(status: 200, body: '{"success":true}')
+    make_deployer.deploy(source: "export default {}", delivery_mode: "direct")
+    assert_requested stub
+    assert_not_requested :get, "#{script_url}/settings"
+  end
+
   def test_deploy_raises_on_failure
     stub_request(:put, script_url).to_return(
       status: 403,

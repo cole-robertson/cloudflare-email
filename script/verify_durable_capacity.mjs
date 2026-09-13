@@ -58,7 +58,7 @@ try {
   `);
   await writeFile(join(temporary, "wrangler.json"), JSON.stringify({
     name: "cloudflare-email-capacity-verification", main: "worker.js", compatibility_date: "2026-09-10",
-    vars: { DURABLE_INBOUND_ENABLED: "true", MAX_EMAIL_BYTES: String(limit),
+    vars: { MAX_EMAIL_BYTES: String(limit),
       RAILS_INGRESS_URL: `http://127.0.0.1:${receiver.address().port}/`, INGRESS_SECRET: secret },
     r2_buckets: [{ binding: "INBOUND_EMAIL_STORE", bucket_name: "synthetic-capacity" }],
     queues: { producers: [{ binding: "INBOUND_EMAIL_QUEUE", queue: "synthetic-capacity" }] },

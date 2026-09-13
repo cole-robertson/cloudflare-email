@@ -55,12 +55,20 @@ module Cloudflare
 
       # Uploads/updates the Worker script. Accepts either `script_path:` (a
       # path to a .js file) or `source:` (the JS source string directly).
-      def deploy(script_path: nil, source: nil)
+      # The Rails deploy task passes delivery_mode: "durable" and validates
+      # existing infrastructure. Low-level callers managing custom Workers may
+      # omit it to preserve their configured transport without changing it.
+      def deploy(script_path: nil, source: nil, delivery_mode: nil)
         source ||= File.read(script_path) if script_path
         raise ArgumentError, "must pass script_path: or source:" if source.nil?
 
+        if delivery_mode
+          raise ArgumentError, "delivery_mode must be durable or direct" unless %w[durable direct].include?(delivery_mode)
+          verify_durable_infrastructure! if delivery_mode == "durable"
+        end
+
         boundary = "----cf-email-#{SecureRandom.hex(16)}"
-        body     = build_multipart(boundary, source)
+        body     = build_multipart(boundary, source, delivery_mode)
 
         request(
           method: :put,
@@ -108,11 +116,34 @@ module Cloudflare
 
       private
 
-      def build_multipart(boundary, source)
-        metadata = JSON.generate({
+      def verify_durable_infrastructure!
+        settings = request(method: :get, path: "/accounts/#{@account_id}/workers/scripts/#{@script_name}/settings")
+        bindings = Array(settings.dig("result", "bindings"))
+        configured = bindings.any? { |b| b["name"] == "INBOUND_EMAIL_STORE" && b["type"] == "r2_bucket" } &&
+          bindings.any? { |b| b["name"] == "INBOUND_EMAIL_QUEUE" && b["type"] == "queue" }
+        schedules = request(method: :get, path: "/accounts/#{@account_id}/workers/scripts/#{@script_name}/schedules")
+        configured &&= Array(schedules.dig("result", "schedules")).any? { |s| s["cron"] == "* * * * *" }
+        return if configured
+
+        raise ConfigurationError, "Provision durable R2, Queue producer/consumer and minute schedule using the generated Worker docs/durable-inbound.md before deploying; use INBOUND_DELIVERY_MODE=direct only for explicit direct fallback"
+      rescue Error => error
+        raise unless error.status == 404
+
+        raise ConfigurationError, "Provision the durable Worker with Wrangler first (see Worker docs/durable-inbound.md); use INBOUND_DELIVERY_MODE=direct only for explicit direct fallback"
+      end
+
+      def build_multipart(boundary, source, delivery_mode)
+        settings = {
           main_module:        "index.js",
           compatibility_date: @compatibility_date,
-        })
+          # API script uploads must not remove provisioned storage, queue or
+          # secrets. In particular a direct rollback still drains pending mail.
+          keep_bindings: %w[secret_text plain_text r2_bucket queue],
+        }
+        if delivery_mode
+          settings[:bindings] = [{ type: "plain_text", name: "INBOUND_DELIVERY_MODE", text: delivery_mode }]
+        end
+        metadata = JSON.generate(settings)
 
         parts = []
         parts << "--#{boundary}"

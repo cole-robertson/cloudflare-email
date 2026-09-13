@@ -18,21 +18,52 @@ name = "cloudflare-email-ingress-production"
 # After deploying, in the Cloudflare dashboard:
 #   Email Routing -> Routes -> "Send to a Worker" -> select the matching environment Worker
 
-# Optional durable inbound mode. Provision the bucket and queue first, and copy
-# these sections for EACH environment enabled. See docs/durable-inbound.md.
-# [env.production.vars]
-# DURABLE_INBOUND_ENABLED = "true"
-# [[env.production.r2_buckets]]
-# binding = "INBOUND_EMAIL_STORE"
-# bucket_name = "your-production-inbound-email"
-# [[env.production.queues.producers]]
-# binding = "INBOUND_EMAIL_QUEUE"
-# queue = "your-production-inbound-email"
-# [[env.production.queues.consumers]]
-# queue = "your-production-inbound-email"
-# max_batch_size = 5
-# max_batch_timeout = 5
-# max_retries = 10
-# retry_delay = 300
-# [env.production.triggers]
-# crons = ["* * * * *"]
+# Durable delivery is the default. Create these private resources before deploy.
+# See docs/durable-inbound.md. Buckets must not expire pending objects.
+# Explicit emergency fallback: set INBOUND_DELIVERY_MODE = "direct" in the
+# chosen environment's [env.<name>.vars]. Keep recovery bindings and cron.
+
+[[env.development.r2_buckets]]
+binding = "INBOUND_EMAIL_STORE"
+bucket_name = "cloudflare-email-inbound-development"
+[[env.development.queues.producers]]
+binding = "INBOUND_EMAIL_QUEUE"
+queue = "cloudflare-email-inbound-development"
+[[env.development.queues.consumers]]
+queue = "cloudflare-email-inbound-development"
+max_batch_size = 5
+max_batch_timeout = 5
+max_retries = 10
+retry_delay = 300
+[env.development.triggers]
+crons = ["* * * * *"]
+
+[[env.staging.r2_buckets]]
+binding = "INBOUND_EMAIL_STORE"
+bucket_name = "cloudflare-email-inbound-staging"
+[[env.staging.queues.producers]]
+binding = "INBOUND_EMAIL_QUEUE"
+queue = "cloudflare-email-inbound-staging"
+[[env.staging.queues.consumers]]
+queue = "cloudflare-email-inbound-staging"
+max_batch_size = 5
+max_batch_timeout = 5
+max_retries = 10
+retry_delay = 300
+[env.staging.triggers]
+crons = ["* * * * *"]
+
+[[env.production.r2_buckets]]
+binding = "INBOUND_EMAIL_STORE"
+bucket_name = "cloudflare-email-inbound-production"
+[[env.production.queues.producers]]
+binding = "INBOUND_EMAIL_QUEUE"
+queue = "cloudflare-email-inbound-production"
+[[env.production.queues.consumers]]
+queue = "cloudflare-email-inbound-production"
+max_batch_size = 5
+max_batch_timeout = 5
+max_retries = 10
+retry_delay = 300
+[env.production.triggers]
+crons = ["* * * * *"]

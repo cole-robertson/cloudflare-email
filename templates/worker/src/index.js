@@ -5,6 +5,9 @@
  * HMAC-SHA256 over "v2.{timestamp}.{encoded_envelope}.{raw_body}", and POSTs it to the Rails
  * ingress controller shipped with the cloudflare-email gem.
  * Custom integrations can opt into v3, binding provider metadata into the signature.
+ * The default handler commits to INBOUND_EMAIL_STORE (R2), then queues delivery
+ * through INBOUND_EMAIL_QUEUE. Keep a minute cron for recovery after queue loss.
+ * INBOUND_DELIVERY_MODE=direct explicitly selects the single-attempt fallback.
  *
  * Required environment variables (set via `wrangler secret put` OR the
  * `cloudflare:email:deploy_worker` rake task shipped with this gem):
@@ -315,8 +318,9 @@ function durableLog(reason, key, httpStatus) {
 
 // One atomic R2 object holds both the original bytes and stable signed context.
 // Queue messages are disposable wakeups; pending objects are the source of truth.
-export async function retainEmail(message, env, { metadata } = {}) {
+export async function retainEmail(message, env, { metadata, archive } = {}) {
   const limit = durableConfig(env);
+  if (archive !== undefined && typeof archive !== "function") throw new Error("invalid inbound archive callback");
   if (!validAddress(message.from, true) || !validAddress(message.to)) {
     message.setReject("worker received invalid SMTP envelope");
     return;
@@ -348,6 +352,12 @@ export async function retainEmail(message, env, { metadata } = {}) {
   } catch {
     durableLog("storage_failed", key);
     throw new Error("inbound durable storage unavailable");
+  }
+  // A secondary archive receives the public raw/context contract, never the
+  // private storage frame. Its failure cannot undo the primary durable write.
+  if (archive) {
+    try { await archiveWithin(archive, { raw, from: message.from, to: message.to, key }, 10_000); }
+    catch { durableLog("archive_failed_retained", key); }
   }
   try { await env.INBOUND_EMAIL_QUEUE.send({ version: 1, key }); }
   catch { durableLog("enqueue_failed_retained", key); }
@@ -416,10 +426,17 @@ export async function sweepRetainedEmails(env) {
 
 export default {
   email(message, env) {
-    return env.DURABLE_INBOUND_ENABLED === "true" ? retainEmail(message, env) : forwardEmail(message, env);
+    const mode = env.INBOUND_DELIVERY_MODE ?? "durable";
+    if (mode === "direct") return forwardEmail(message, env);
+    if (mode !== "durable") throw new Error("INBOUND_DELIVERY_MODE must be durable or direct");
+    return retainEmail(message, env);
   },
   queue(batch, env) { return consumeRetainedEmails(batch, env); },
   scheduled(_event, env, ctx) {
-    if (env.DURABLE_INBOUND_ENABLED === "true") ctx.waitUntil(sweepRetainedEmails(env));
+    // Keep draining retained mail during a direct-mode rollback. A direct-only
+    // deployment has no schedule or storage; partial durable config must fail.
+    if (env.INBOUND_DELIVERY_MODE !== "direct" || env.INBOUND_EMAIL_STORE || env.INBOUND_EMAIL_QUEUE) {
+      ctx.waitUntil(sweepRetainedEmails(env));
+    }
   },
 };

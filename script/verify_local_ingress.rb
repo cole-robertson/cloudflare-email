@@ -157,6 +157,7 @@ begin
   File.write("#{LOCAL_ROOT}/wrangler.json", JSON.generate(
     name: "cloudflare-email-local-verification", main: worker_source,
     compatibility_date: "2026-09-10", observability: { enabled: false },
+    vars: { INBOUND_DELIVERY_MODE: "direct" },
   ))
 
   attachment = (0..255).to_a.pack("C*") + "\x00\xff\r\n".b
@@ -252,7 +253,7 @@ begin
   File.write("#{LOCAL_ROOT}/wrangler.json", JSON.generate(
     name: "cloudflare-email-local-verification", main: wrapper,
     compatibility_date: "2026-09-10", observability: { enabled: false },
-    vars: { DURABLE_INBOUND_ENABLED: "true" },
+
     r2_buckets: [{ binding: "INBOUND_EMAIL_STORE", bucket_name: "synthetic-inbound" }],
     queues: {
       producers: [{ binding: "INBOUND_EMAIL_QUEUE", queue: "synthetic-inbound" }],

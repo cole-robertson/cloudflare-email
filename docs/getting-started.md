@@ -126,6 +126,11 @@ This is separate from verifying the sending domain.
 Deploy Rails with ActionMailbox storage and workers configured. Then run these
 commands in an environment with production configuration and deployment credentials:
 
+First create the private R2 bucket and Queue, then deploy the generated Wrangler
+configuration using the [durable setup guide](../templates/worker/docs/durable-inbound.md).
+The Ruby task below updates that provisioned Worker while preserving its bindings.
+It refuses a missing bucket/queue binding or recovery schedule before changing code.
+
 ```sh
 RAILS_ENV=production bin/rails cloudflare:email:deploy_worker URL=https://app.example.com/rails/action_mailbox/cloudflare/inbound_emails
 RAILS_ENV=production bin/rails cloudflare:email:provision_route ADDRESS=support@in.example.com
@@ -166,11 +171,11 @@ Install `cloudflared`, configure development credentials and a separate developm
 receiving route, then start Rails. In another terminal:
 
 ```sh
-bin/rails cloudflare:email:deploy_worker
+INBOUND_DELIVERY_MODE=direct bin/rails cloudflare:email:deploy_worker
 bin/rails cloudflare:email:dev
 ```
 
-The first command creates the development Worker; the second points it at a
+The first command creates the development Worker with the explicit direct fallback; the second points it at a
 temporary tunnel to your local Rails server on port 3000. Keep the tunnel running
 while testing and stop it with Ctrl-C. Set `PORT=...` if Rails uses another port.
 The task checks that Rails has the ingress-only guard; restart Rails if asked.

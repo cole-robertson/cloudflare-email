@@ -102,8 +102,8 @@ module Cloudflare
           should_deploy = options[:deploy_worker]
           if should_deploy.nil?
             say ""
-            say "  The Worker can be deployed via the Cloudflare API (pure Ruby, no wrangler/Node)"
-            say "  once you've set cloudflare.account_id and cloudflare.api_token in Rails credentials."
+            say "  First provision durable storage, Queue and cron using the generated Worker docs/durable-inbound.md."
+            say "  After the initial Wrangler deploy, Ruby uploads preserve those infrastructure bindings."
             say "  Run `RAILS_ENV=production bin/rails cloudflare:email:deploy_worker SCRIPT=#{worker_script_argument} URL=https://yourapp.com#{ingress_path}`"
             say "  after `bin/rails credentials:edit`."
             say ""
@@ -121,6 +121,7 @@ module Cloudflare
             @ingress_secret = SecureRandom.hex(32)
 
             inside options[:worker_dir] do
+              say "Create the R2 bucket and Queue in docs/durable-inbound.md before deploying. Customize wrangler.toml names if needed."
               run "npm ci", abort_on_failure: true
 
               ingress_url = ask("Rails ingress URL? (e.g. https://yourapp.com#{ingress_path})")
@@ -168,10 +169,10 @@ module Cloudflare
 
           if options[:inbound] && !@worker_deployed
             say "  4. Deploy the Worker (pick one):"
-            say "       # Pure Ruby (recommended — no wrangler/Node required):"
+            say "       # First follow Worker docs/durable-inbound.md to provision R2, Queue and cron."
             say "       RAILS_ENV=production bin/rails cloudflare:email:deploy_worker SCRIPT=#{worker_script_argument} URL=https://yourapp.com#{ingress_path}"
             say ""
-            say "       # Or via wrangler if you have it installed:"
+            say "       # Initial infrastructure deploy (after provisioning resources):"
             say "       cd #{options[:worker_dir]}"
             say "       npm ci"
             say "       npm run deploy -- --env production"
@@ -182,7 +183,7 @@ module Cloudflare
 
           if options[:inbound]
             say "  5. For local dev (tunnels cloudflared to your Worker):"
-            say "       RAILS_ENV=development bin/rails cloudflare:email:deploy_worker SCRIPT=#{worker_script_argument}"
+            say "       INBOUND_DELIVERY_MODE=direct RAILS_ENV=development bin/rails cloudflare:email:deploy_worker SCRIPT=#{worker_script_argument}"
             say "       RAILS_ENV=development bin/rails cloudflare:email:dev"
             say "     Route a separate test address to cloudflare-email-ingress-development."
             say ""

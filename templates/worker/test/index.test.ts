@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import worker, { forwardEmail, signedEmailHeaders } from "../src/index.js";
+import { forwardEmail, signedEmailHeaders } from "../src/index.js";
 
 // Minimal fake EmailMessage implementing the surface the Worker uses.
 function makeMessage(raw: string) {
@@ -64,7 +64,7 @@ describe("cloudflare-email Worker", () => {
     const env = { RAILS_INGRESS_URL: URL_, INGRESS_SECRET: SECRET };
     const { message } = makeMessage(RAW);
 
-    await worker.email(message as any, env);
+    await forwardEmail(message as any, env);
 
     expect(fetchSpy).toHaveBeenCalledOnce();
     const [url, opts] = fetchSpy.mock.calls[0];
@@ -94,7 +94,7 @@ describe("cloudflare-email Worker", () => {
   it.each(["http://rails.test/inbound", "https://user:password@rails.test/inbound", "https://rails.test/inbound#fragment", "invalid"])(
     "rejects invalid ingress URL %j before reading mail", async (url) => {
       const { message, rejects } = makeMessage(RAW);
-      await worker.email(message as any, { RAILS_INGRESS_URL: url, INGRESS_SECRET: SECRET });
+      await forwardEmail(message as any, { RAILS_INGRESS_URL: url, INGRESS_SECRET: SECRET });
       expect(rejects).toHaveLength(1);
       expect(fetchSpy).not.toHaveBeenCalled();
       expect(message.raw.locked).toBe(false);
@@ -103,14 +103,14 @@ describe("cloudflare-email Worker", () => {
 
   it("allows loopback HTTP for local verification", async () => {
     const { message, rejects } = makeMessage(RAW);
-    await worker.email(message as any, { RAILS_INGRESS_URL: "http://127.0.0.1:3000/inbound", INGRESS_SECRET: SECRET });
+    await forwardEmail(message as any, { RAILS_INGRESS_URL: "http://127.0.0.1:3000/inbound", INGRESS_SECRET: SECRET });
     expect(rejects).toEqual([]);
     expect(fetchSpy).toHaveBeenCalledOnce();
   });
 
   it("accepts mail at the configured size boundary", async () => {
     const { message, rejects } = makeMessage(RAW);
-    await worker.email(message as any, { RAILS_INGRESS_URL: URL_, INGRESS_SECRET: SECRET, MAX_EMAIL_BYTES: String(message.rawSize) });
+    await forwardEmail(message as any, { RAILS_INGRESS_URL: URL_, INGRESS_SECRET: SECRET, MAX_EMAIL_BYTES: String(message.rawSize) });
     expect(rejects).toEqual([]);
     expect(fetchSpy).toHaveBeenCalledOnce();
   });
@@ -118,7 +118,7 @@ describe("cloudflare-email Worker", () => {
   it.each([true, false])("enforces size limit with accurate rawSize=%j", async (accurate) => {
     const { message, rejects } = makeMessage(RAW);
     if (!accurate) message.rawSize = 0;
-    await worker.email(message as any, { RAILS_INGRESS_URL: URL_, INGRESS_SECRET: SECRET, MAX_EMAIL_BYTES: "16" });
+    await forwardEmail(message as any, { RAILS_INGRESS_URL: URL_, INGRESS_SECRET: SECRET, MAX_EMAIL_BYTES: "16" });
     expect(rejects).toHaveLength(1);
     expect(rejects[0]).toMatch(/size limit/);
     expect(fetchSpy).not.toHaveBeenCalled();
@@ -126,7 +126,7 @@ describe("cloudflare-email Worker", () => {
 
   it("rejects invalid size configuration", async () => {
     const { message, rejects } = makeMessage(RAW);
-    await worker.email(message as any, { RAILS_INGRESS_URL: URL_, INGRESS_SECRET: SECRET, MAX_EMAIL_BYTES: "0" });
+    await forwardEmail(message as any, { RAILS_INGRESS_URL: URL_, INGRESS_SECRET: SECRET, MAX_EMAIL_BYTES: "0" });
     expect(rejects).toHaveLength(1);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
@@ -136,7 +136,7 @@ describe("cloudflare-email Worker", () => {
     const env = { RAILS_INGRESS_URL: URL_, INGRESS_SECRET: SECRET };
     const { message, rejects } = makeMessage(RAW);
 
-    await worker.email(message as any, env);
+    await forwardEmail(message as any, env);
 
     expect(rejects).toEqual(["upstream returned 503"]);
   });
@@ -144,10 +144,10 @@ describe("cloudflare-email Worker", () => {
   it("authenticates SMTP recipients independently of sender-controlled To headers", async () => {
     vi.spyOn(Date, "now").mockReturnValue(1_750_000_000_000);
     const env = { RAILS_INGRESS_URL: URL_, INGRESS_SECRET: SECRET };
-    await worker.email(makeMessage(RAW).message as any, env);
+    await forwardEmail(makeMessage(RAW).message as any, env);
     const other = makeMessage(RAW);
     other.message.to = "bcc@trial.test";
-    await worker.email(other.message as any, env);
+    await forwardEmail(other.message as any, env);
     const first = fetchSpy.mock.calls[0][1];
     const second = fetchSpy.mock.calls[1][1];
     expect(second.body).toEqual(first.body);
@@ -159,7 +159,7 @@ describe("cloudflare-email Worker", () => {
   it("allows the empty SMTP reverse path used by bounce messages", async () => {
     const { message, rejects } = makeMessage(RAW);
     message.from = "";
-    await worker.email(message as any, { RAILS_INGRESS_URL: URL_, INGRESS_SECRET: SECRET });
+    await forwardEmail(message as any, { RAILS_INGRESS_URL: URL_, INGRESS_SECRET: SECRET });
     expect(rejects).toEqual([]);
     expect(fetchSpy).toHaveBeenCalledOnce();
   });
@@ -168,7 +168,7 @@ describe("cloudflare-email Worker", () => {
     "rejects invalid SMTP recipient %j before posting", async (address) => {
       const { message, rejects } = makeMessage(RAW);
       message.to = address;
-      await worker.email(message as any, { RAILS_INGRESS_URL: URL_, INGRESS_SECRET: SECRET });
+      await forwardEmail(message as any, { RAILS_INGRESS_URL: URL_, INGRESS_SECRET: SECRET });
       expect(rejects).toEqual(["worker received invalid SMTP envelope"]);
       expect(fetchSpy).not.toHaveBeenCalled();
     },
@@ -178,7 +178,7 @@ describe("cloudflare-email Worker", () => {
     const env = { RAILS_INGRESS_URL: "", INGRESS_SECRET: SECRET };
     const { message, rejects } = makeMessage(RAW);
 
-    await worker.email(message as any, env);
+    await forwardEmail(message as any, env);
 
     expect(rejects[0]).toMatch(/missing RAILS_INGRESS_URL/);
     expect(fetchSpy).not.toHaveBeenCalled();
@@ -188,7 +188,7 @@ describe("cloudflare-email Worker", () => {
     const env = { RAILS_INGRESS_URL: URL_, INGRESS_SECRET: "" };
     const { message, rejects } = makeMessage(RAW);
 
-    await worker.email(message as any, env);
+    await forwardEmail(message as any, env);
 
     expect(rejects[0]).toMatch(/missing .*INGRESS_SECRET/);
     expect(fetchSpy).not.toHaveBeenCalled();
@@ -199,7 +199,7 @@ describe("cloudflare-email Worker", () => {
     const env = { RAILS_INGRESS_URL: URL_, INGRESS_SECRET: SECRET };
     const { message, rejects } = makeMessage(RAW);
 
-    await worker.email(message as any, env);
+    await forwardEmail(message as any, env);
 
     expect(rejects).toEqual(["upstream fetch failed"]);
   });
@@ -210,7 +210,7 @@ describe("cloudflare-email Worker", () => {
       options.signal.addEventListener("abort", () => reject(new Error("aborted")));
     }));
     const { message, rejects } = makeMessage(RAW);
-    const delivery = worker.email(message as any, { RAILS_INGRESS_URL: URL_, INGRESS_SECRET: SECRET });
+    const delivery = forwardEmail(message as any, { RAILS_INGRESS_URL: URL_, INGRESS_SECRET: SECRET });
     // Signing uses async Web Crypto, so wait until fetch starts before advancing timers.
     await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledOnce());
     await vi.advanceTimersByTimeAsync(15_000);
@@ -221,7 +221,7 @@ describe("cloudflare-email Worker", () => {
 
   it("refuses redirects and clears the timeout after delivery", async () => {
     vi.useFakeTimers();
-    await worker.email(makeMessage(RAW).message as any, { RAILS_INGRESS_URL: URL_, INGRESS_SECRET: SECRET });
+    await forwardEmail(makeMessage(RAW).message as any, { RAILS_INGRESS_URL: URL_, INGRESS_SECRET: SECRET });
     const options = fetchSpy.mock.calls[0][1];
     expect(options.redirect).toBe("manual");
     await vi.advanceTimersByTimeAsync(15_000);
@@ -231,7 +231,7 @@ describe("cloudflare-email Worker", () => {
   it("rejects an ingress redirect response", async () => {
     fetchSpy.mockResolvedValueOnce(new Response(null, { status: 302, headers: { Location: "https://other.test" } }));
     const { message, rejects } = makeMessage(RAW);
-    await worker.email(message as any, { RAILS_INGRESS_URL: URL_, INGRESS_SECRET: SECRET });
+    await forwardEmail(message as any, { RAILS_INGRESS_URL: URL_, INGRESS_SECRET: SECRET });
     expect(rejects).toEqual(["upstream returned 302"]);
     expect(fetchSpy).toHaveBeenCalledOnce();
   });
@@ -240,11 +240,11 @@ describe("cloudflare-email Worker", () => {
     // Sanity check: two different bodies produce two different signatures.
     const env = { RAILS_INGRESS_URL: URL_, INGRESS_SECRET: SECRET };
 
-    await worker.email(makeMessage(RAW).message as any, env);
+    await forwardEmail(makeMessage(RAW).message as any, env);
     const sig1 = fetchSpy.mock.calls[0][1].headers["X-CF-Email-Signature"];
 
     fetchSpy.mockClear();
-    await worker.email(makeMessage(RAW + "tamper").message as any, env);
+    await forwardEmail(makeMessage(RAW + "tamper").message as any, env);
     const sig2 = fetchSpy.mock.calls[0][1].headers["X-CF-Email-Signature"];
 
     expect(sig1).not.toBe(sig2);

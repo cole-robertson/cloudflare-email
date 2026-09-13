@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Add opt-in durable inbound delivery: commit original mail and envelope context
+- Make durable inbound delivery the Worker default, with explicit direct fallback: commit original mail and envelope context
   to R2 before Worker acceptance, deliver queue pointers with fresh signatures,
   and recover pending mail through a bounded scheduled sweep. Rails errors,
   lost responses, enqueue failures and exhausted queue retries retain pending

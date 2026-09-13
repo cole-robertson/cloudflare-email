@@ -31,11 +31,11 @@ a tenant connection adapter. A mailbox tenant key alone does not switch database
 
 ## Upcoming integration tools (unreleased)
 
-[Durable inbound delivery](../templates/worker/README.md#durable-inbound-delivery-opt-in)
+[Durable inbound delivery](../templates/worker/README.md#durable-inbound-delivery)
 saves raw email and its envelope in R2 before the Worker returns successfully.
 Queues attempt the Rails handoff, and a scheduled pass recovers retained mail
-after enqueue failures or retry exhaustion. Enable it explicitly and provision
-the storage, queue and schedule; existing installations keep direct forwarding.
+after enqueue failures or retry exhaustion. Provision the storage, queue and
+schedule before deploying; direct forwarding requires an explicit fallback setting.
 
 [Routing delivery confirmation](routing-deliveries.md) adds a read-only provider
 client and optional durable receipts for qualifying single-recipient deliveries

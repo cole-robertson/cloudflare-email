@@ -26,7 +26,7 @@ function setup() {
       return { objects: page.map(key => ({ key })), truncated: keys.length > limit, cursor: page.at(-1) };
     }),
   };
-  const env = { DURABLE_INBOUND_ENABLED: "true", RAILS_INGRESS_URL: "https://rails.example.com/ingress",
+  const env = { RAILS_INGRESS_URL: "https://rails.example.com/ingress",
     INGRESS_SECRET: "secret", INBOUND_EMAIL_STORE: bucket, INBOUND_EMAIL_QUEUE: { send: vi.fn() } };
   return { env, bucket, objects };
 }
@@ -48,9 +48,51 @@ describe("durable inbound", () => {
   it("does not acknowledge failed storage or enqueue a missing payload", async () => {
     const { env, bucket } = setup();
     bucket.put.mockRejectedValue(new Error("secret failure"));
-    await expect(retainEmail(message(), env)).rejects.toThrow("durable storage unavailable");
+    const archive = vi.fn();
+    await expect(retainEmail(message(), env, { archive })).rejects.toThrow("durable storage unavailable");
+    expect(archive).not.toHaveBeenCalled();
     expect(env.INBOUND_EMAIL_QUEUE.send).not.toHaveBeenCalled();
     expect(JSON.stringify(vi.mocked(console.warn).mock.calls)).not.toContain("secret failure");
+  });
+
+  it("fails closed when durable infrastructure is missing or mode is misspelled", async () => {
+    const { env } = setup();
+    await expect(worker.email(message(), { ...env, INBOUND_EMAIL_STORE: undefined })).rejects.toThrow("configuration invalid");
+    expect(() => worker.email(message(), { ...env, INBOUND_DELIVERY_MODE: "durabel" })).toThrow("INBOUND_DELIVERY_MODE");
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("direct fallback still drains the existing R2 backlog through scheduled recovery", async () => {
+    const { env, objects } = setup();
+    await worker.email(message(), env);
+    const fallback = { ...env, INBOUND_DELIVERY_MODE: "direct" };
+    await worker.email(message(), fallback);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const tasks = [];
+    worker.scheduled({}, fallback, { waitUntil: task => tasks.push(task) });
+    await Promise.all(tasks);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(objects.size).toBe(0);
+  });
+
+  it.each(["error", "timeout"])("retains and enqueues when a secondary archive has an %s", async failure => {
+    const { env, objects } = setup();
+    vi.useFakeTimers();
+    const archive = vi.fn(async ({ raw: bytes, from, to, key }) => {
+      expect(objects.has(key)).toBe(true);
+      expect(bytes).toEqual(raw);
+      expect(from).toBe("sender@example.com");
+      expect(to).toBe("inbox@example.com");
+      if (failure === "error") throw new Error("private archive error");
+      await new Promise(() => {});
+    });
+    const pending = retainEmail(message(), env, { archive });
+    await vi.advanceTimersByTimeAsync(10_001);
+    const { key } = await pending;
+    expect(archive).toHaveBeenCalledTimes(1);
+    expect(objects.has(key)).toBe(true);
+    expect(env.INBOUND_EMAIL_QUEUE.send).toHaveBeenCalledWith({ version: 1, key });
+    expect(JSON.stringify(vi.mocked(console.warn).mock.calls)).not.toContain("private archive error");
   });
 
   it("recovers failed enqueue through scheduled scanning", async () => {
