@@ -17,6 +17,9 @@ for (const folder of ["src", "test"]) {
 for (const name of ["package-lock.json", "vitest.config.ts"]) {
   files.set(name, readFileSync(join(source, name), "utf8"));
 }
+for (const name of ["docs/domain-setup.md", "scripts/check-subdomains.mjs"]) {
+  files.set(name, readFileSync(join(source, name), "utf8"));
+}
 files.set("LICENSE.txt", readFileSync(join(root, "LICENSE.txt"), "utf8"));
 const config = readFileSync(join(source, "wrangler.toml"), "utf8");
 const productionStart = config.indexOf("[[env.production.r2_buckets]]");
@@ -30,7 +33,7 @@ files.set("wrangler.toml", [
   config.slice(productionStart).replaceAll("env.production.", "").replaceAll("-production", ""),
 ].join("\n"));
 const pkg = JSON.parse(readFileSync(join(source, "package.json"), "utf8"));
-pkg.scripts = { deploy: "wrangler deploy", dev: "wrangler dev", check: "wrangler deploy --dry-run", test: "vitest run" };
+pkg.scripts = { ...pkg.scripts, deploy: "wrangler deploy", dev: "wrangler dev", check: "wrangler deploy --dry-run" };
 pkg.cloudflare = { bindings: {
   RAILS_INGRESS_URL: { description: "Your deployed Rails HTTPS ingress URL, normally `https://your-app.com/rails/action_mailbox/cloudflare/inbound_emails`. Deploy cloudflare-email 0.3+ in Rails first." },
   INGRESS_SECRET: { description: "Paste the same random secret configured as `cloudflare.ingress_secret` in Rails credentials (or `CLOUDFLARE_INGRESS_SECRET`). Generate it with `openssl rand -hex 32`." },

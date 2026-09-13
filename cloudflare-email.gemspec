@@ -44,6 +44,8 @@ Gem::Specification.new do |spec|
     "templates/deploy-to-cloudflare/vitest.config.ts",
     "templates/deploy-to-cloudflare/src/*.js",
     "templates/deploy-to-cloudflare/test/*.test.ts",
+    "templates/deploy-to-cloudflare/docs/*.md",
+    "templates/deploy-to-cloudflare/scripts/*.mjs",
     "README.md",
     "SECURITY.md",
     "docs/**/*.md",

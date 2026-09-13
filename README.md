@@ -18,6 +18,8 @@ Deploy the inbound Worker with guided R2/Queue provisioning and secret setup. [P
 | --- | --- |
 | [Features at a glance](docs/features.md) | Everything the gem handles, and what your app supplies |
 | [Getting started](docs/getting-started.md) | Install, send your first email, receive replies, and save reliable send operations |
+| [Cloudflare domain setup](templates/worker/docs/domain-setup.md) | Configure once for many mailboxes or dynamic organization subdomains, with a Rebulk example and DNS checks |
+| [Hello-world Rails template](https://github.com/cole-robertson/cloudflare-email-rails-starter) | Clone a minimal SQLite mailbox app using the published gem and its management UI |
 | [Troubleshooting](docs/troubleshooting.md) | What to check when mail or delivery updates do not arrive |
 | [Managed mailboxes](docs/mailboxes.md) | Create inboxes and aliases, read/archive mail, and send from a mailbox |
 | [Management engine](docs/management-engine.md) | Mount an optional server-rendered mailbox UI using your app's authentication |

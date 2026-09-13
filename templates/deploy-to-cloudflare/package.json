@@ -11,6 +11,7 @@
     "deploy": "wrangler deploy",
     "dev": "wrangler dev",
     "check": "wrangler deploy --dry-run",
+    "check:subdomains": "node scripts/check-subdomains.mjs",
     "test": "vitest run"
   },
   "devDependencies": {

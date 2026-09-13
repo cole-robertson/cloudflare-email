@@ -45,6 +45,13 @@ use the same tenant connection as the mailbox tables for atomic incoming storage
 
 ## Register an organization's domain
 
+For addresses such as `invoices@acme.in.example.com`, follow the
+[Cloudflare domain setup guide](../templates/worker/docs/domain-setup.md).
+It covers Rebulk's existing wildcard receiving pattern, one-time infrastructure
+verification, and exact organization-domain registration in Rails. The gem does
+not require a per-organization Worker allowlist or Cloudflare approval once that
+receiving infrastructure is established; new accounts must verify the provider behavior.
+
 Run directory management from your authorized administration/provisioning code.
 Do not expose arbitrary domain claims to customers without ownership checks.
 

@@ -6,6 +6,12 @@ gem.
 
 ## Deploy
 
+Choose a single receiving domain or dynamic organization subdomains using the
+[domain setup worksheet and cited examples](docs/domain-setup.md). Once your
+receiving namespace is verified, new mailboxes can be created in Rails without
+editing a Worker recipient list. `npm run check:subdomains -- --base in.example.com`
+checks public MX for fresh names; it does not claim live delivery verification.
+
 For a guided dashboard deployment that provisions resources and prompts for
 secrets, use the [Deploy to Cloudflare template](../deploy-to-cloudflare/README.md).
 It uses this same Worker with a standalone configuration. The CLI setup below

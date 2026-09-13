@@ -9,6 +9,7 @@
     "deploy": "node scripts/wrangler.mjs deploy",
     "dev": "node scripts/wrangler.mjs dev",
     "check": "wrangler deploy --env development --dry-run",
+    "check:subdomains": "node scripts/check-subdomains.mjs",
     "test": "vitest run"
   },
   "devDependencies": {

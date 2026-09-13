@@ -1,0 +1,66 @@
+{
+  "checked_at": "2026-09-13T21:23:59.208Z",
+  "base": "rebulk.com",
+  "dns_observation": "cloudflare_mx_observed_for_all_names",
+  "delivery_verified": false,
+  "checks": [
+    {
+      "domain": "test.rebulk.com",
+      "fresh_probe": false,
+      "status": "cloudflare_mx_observed",
+      "mx": [
+        {
+          "priority": 91,
+          "exchange": "route3.mx.cloudflare.net"
+        },
+        {
+          "priority": 30,
+          "exchange": "route1.mx.cloudflare.net"
+        },
+        {
+          "priority": 61,
+          "exchange": "route2.mx.cloudflare.net"
+        }
+      ]
+    },
+    {
+      "domain": "cf-probe-dcbf69b8b6624904.rebulk.com",
+      "fresh_probe": true,
+      "status": "cloudflare_mx_observed",
+      "mx": [
+        {
+          "priority": 30,
+          "exchange": "route1.mx.cloudflare.net"
+        },
+        {
+          "priority": 61,
+          "exchange": "route2.mx.cloudflare.net"
+        },
+        {
+          "priority": 91,
+          "exchange": "route3.mx.cloudflare.net"
+        }
+      ]
+    },
+    {
+      "domain": "cf-probe-4b4794a79f943c7f.rebulk.com",
+      "fresh_probe": true,
+      "status": "cloudflare_mx_observed",
+      "mx": [
+        {
+          "priority": 30,
+          "exchange": "route1.mx.cloudflare.net"
+        },
+        {
+          "priority": 61,
+          "exchange": "route2.mx.cloudflare.net"
+        },
+        {
+          "priority": 91,
+          "exchange": "route3.mx.cloudflare.net"
+        }
+      ]
+    }
+  ],
+  "next_step": "Inspect the catch-all Worker rule, register two exact domains/mailboxes in Rails, and send real test emails. MX answers do not verify account ownership, Email Routing acceptance, Worker delivery, or Rails persistence."
+}

@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Add a cited one-time domain setup guide for both receiving domains and dynamic
+  organization subdomains, shared between Worker templates. Add a read-only
+  `npm run check:subdomains` DNS helper with named/fresh probes and explicit limits
+  on what DNS can verify. The Worker transport and gem routing behavior are unchanged.
+
 ## 0.3.0 — 2026-09-13
 
 See [upgrading from 0.2](docs/upgrading-0.3.md) before deploying the updated Worker.

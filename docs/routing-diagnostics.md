@@ -6,6 +6,13 @@ A mailbox registered in Rails is not proof that Cloudflare can deliver to it.
 Use this read-only check when onboarding a receiving domain, investigating a
 missing message, or checking an existing catch-all before activating addresses.
 
+For wildcard organization subdomains, also use the
+[domain setup guide and public DNS checker](../templates/worker/docs/domain-setup.md).
+This API inspects exact-domain configured records and does not resolve wildcard
+inheritance. Missing exact records can therefore coexist with working inherited
+MX. Public DNS and real delivery checks provide separate evidence; this diagnostic
+is not a requirement to manually onboard every organization in Cloudflare.
+
 ```sh
 bin/rails cloudflare:email:check_route \
   ADDRESS=houston@customer.example.com \
