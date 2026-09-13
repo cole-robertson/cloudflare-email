@@ -8,6 +8,8 @@ gem.
 
 ```sh
 npm ci
+npx wrangler r2 bucket create cloudflare-email-inbound-production
+npx wrangler queues create cloudflare-email-inbound-production
 npx wrangler secret put INGRESS_SECRET --env production
 npx wrangler secret put RAILS_INGRESS_URL --env production
 npm run deploy -- --env production
@@ -46,20 +48,17 @@ does not change DNS or create routing rules.
 
 For each inbound message, the Worker:
 
-1. Reads the raw RFC822 bytes from `message.raw`.
-2. Encodes `{"from": message.from, "to": message.to}` as unpadded base64url JSON,
-   then computes `HMAC-SHA256(INGRESS_SECRET, "v2.{unix_timestamp}.{encoded_envelope}.{raw_body}")`.
-3. POSTs the raw bytes to `RAILS_INGRESS_URL` with:
-   - `Content-Type: message/rfc822`
-   - `X-CF-Email-Timestamp: <unix seconds>`
-   - `X-CF-Email-Signature: <hex digest>`
-   - `X-CF-Email-Signature-Version: 2`
-   - `X-CF-Email-Envelope: <encoded envelope>`
-4. If Rails responds non-2xx, the network fails, or the request exceeds 15 seconds,
-   the Worker calls `message.setReject`. Redirects are refused to prevent sending
-   message content and the signature to a different endpoint. The Worker does
-   not retry delivery automatically. A timeout can occur after Rails accepted
-   the message, so consumers should handle duplicate deliveries.
+1. Validates and stores the exact RFC822 bytes and envelope in private R2.
+2. Queues a small pointer after storage succeeds.
+3. Signs and POSTs the stored message to Rails; only HTTP 2xx allows deleting it.
+4. Retries failures through the Queue and a minute-by-minute scheduled recovery
+   pass. Even exhausted queue retries leave the original message recoverable.
+
+The signed request uses HMAC-SHA256 and authenticates the original SMTP envelope
+alongside the MIME bytes. See [durable delivery setup and recovery](./docs/durable-inbound.md).
+`INBOUND_DELIVERY_MODE=direct` selects an explicit single-attempt fallback that
+calls `message.setReject` on non-2xx, timeout or network failure. Existing pending
+mail keeps draining through Queue and cron while this fallback is selected.
 
 The Rails controller verifies the signature in constant time and rejects
 timestamps outside its 5-minute acceptance window. A signature authenticates the
@@ -79,7 +78,7 @@ sender for bounce messages. Other address forms are rejected before forwarding.
 Keep your existing archiving, sender checks, and fallback policy. Copy this
 template's `src/index.js` into your Worker project and import either helper.
 `forwardEmail(message, env)` uses the same bounded reading, URL checks, timeout,
-and rejection policy as the bundled Worker. Optional metadata selects v3 signing:
+and rejection policy as the explicit direct fallback. Optional metadata selects v3 signing:
 
 ```js
 import { forwardEmail } from "./cloudflare-ingress.js";
@@ -145,7 +144,7 @@ permit storing it with email records.
 one HTTP delivery attempt. Your Worker decides how a result maps to SMTP
 rejection, retry, fallback forwarding or logging. It does not call `setReject`
 or `forward` and does not extract or interpret sender authentication evidence.
-The existing default export and `forwardEmail` keep their existing behavior.
+`forwardEmail` remains the explicit direct helper; the default export retains mail durably.
 
 ```js
 import { relayEmail, archiveEmail, signedEmailHeaders } from "./cloudflare-ingress.js";
@@ -228,14 +227,12 @@ become `?` in this display metadata only. Retention, unique keys, archive browsi
 and recovery authorization belong to the host. Rails email persistence starts
 after delivery and does not replace this optional outage archive.
 
-## Durable inbound delivery (opt-in)
+## Durable inbound delivery
 
-Enable the optional [durable inbound mode](./docs/durable-inbound.md) to commit
-each accepted message to R2 before the Email Worker returns. A Queue delivers
-small pointers to that storage; scheduled recovery also retries retained messages
-when queue delivery is exhausted or enqueueing failed. Rails outages, timeouts,
-and non-2xx responses leave the original bytes available for later delivery.
-This is off by default and requires explicitly provisioning the bindings and cron.
+[Durable inbound delivery](./docs/durable-inbound.md) is the default. Provision the
+configured private R2 bucket, Queue producer/consumer and cron before deploying.
+There is no rollout enable flag or automatic downgrade when bindings are missing.
+The guide covers upgrades, monitoring, recovery tests and explicit direct fallback.
 
 ## Validate changes
 

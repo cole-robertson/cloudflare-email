@@ -1,11 +1,11 @@
 # Durable inbound delivery
 
 When Rails is down, keep the email at Cloudflare and deliver it when Rails returns.
-Set `DURABLE_INBOUND_ENABLED = "true"` to replace the bundled Worker's direct HTTP
-handoff with R2 storage, Queue delivery and scheduled recovery. This is opt-in;
-no Rails model, database, or tenancy setting needs to change.
+The bundled Worker uses R2 storage, Queue delivery and scheduled recovery by
+default. No enable flag, Rails model, database, or tenancy change is needed.
+Missing infrastructure fails visibly; it never silently downgrades to direct delivery.
 
-Upgrade the Rails gem before enabling this mode. New messages without a parseable
+Upgrade the Rails gem before deploying this Worker. New messages without a parseable
 Message-ID use a deterministic fallback for deduplication across Rails hosts.
 Older records created before this change use ActionMailbox's hostname-dependent
 fallback; replaying those historical messages after upgrading can create a new
@@ -16,12 +16,12 @@ record. Reconcile any existing archive backlog before replaying it automatically
 Create a private R2 bucket and a Queue for each environment:
 
 ```sh
-npx wrangler r2 bucket create your-production-inbound-email
-npx wrangler queues create your-production-inbound-email
+npx wrangler r2 bucket create cloudflare-email-inbound-production
+npx wrangler queues create cloudflare-email-inbound-production
 ```
 
-Uncomment and customize the durable mode configuration at the bottom of
-`wrangler.toml`. Configure **all three** pieces: the `INBOUND_EMAIL_STORE` R2
+The bundled `wrangler.toml` already configures these resources for each environment.
+Customize their names if needed. Configure **all three** pieces: the `INBOUND_EMAIL_STORE` R2
 binding, `INBOUND_EMAIL_QUEUE` producer and consumer, and the once-per-minute
 scheduled trigger. Keep `RAILS_INGRESS_URL` and `INGRESS_SECRET` configured as
 before. Deploy with `npm run deploy -- --env production`.
@@ -31,8 +31,28 @@ an R2 lifecycle rule that expires `cloudflare-email/pending/` objects. Pending
 mail has no automatic expiration and can incur storage costs during a long
 outage. Do not publish the bucket or expose an unauthenticated recovery endpoint.
 Review storage access and retention as you would the Rails email database.
-The gem's simple deployment generator does not provision these resources;
-retain this customized Wrangler configuration in your infrastructure repository.
+Provision and deploy the infrastructure with Wrangler first; retain that configuration
+in your infrastructure repository. Subsequent `cloudflare:email:deploy_worker` Rails
+task uploads preserve R2/Queue bindings and check the bucket binding, queue producer
+binding, and minute schedule before changing code or secrets. This check does not
+validate the bucket lifecycle or queue consumer: verify those in your infrastructure
+configuration and live drill. The Ruby task does not provision resources.
+
+## Direct fallback and upgrades
+
+Set `INBOUND_DELIVERY_MODE = "direct"` in the environment's Wrangler vars only when
+you deliberately want a single HTTP handoff. With the Ruby task, pass
+`INBOUND_DELIVERY_MODE=direct bin/rails cloudflare:email:deploy_worker`.
+Direct mode permanently rejects on HTTP/network failure and cannot buffer an outage.
+Keep the existing R2/Queue bindings and cron during fallback: queue and scheduled
+recovery continue draining previously retained mail. To return to durable delivery,
+remove the Wrangler override or pass `INBOUND_DELIVERY_MODE=durable` to the Ruby task.
+Unknown values fail rather than choosing a transport implicitly.
+
+The old `DURABLE_INBOUND_ENABLED` rollout flag has been removed. Existing direct
+installations must provision the resources before upgrading the Worker, or explicitly
+select `INBOUND_DELIVERY_MODE=direct` before deploying. Upgrading the Ruby gem alone
+does not redeploy a Worker or change live routing.
 
 ## What happens to a message
 
@@ -101,6 +121,13 @@ application or disabling the scheduled recovery trigger.
 For a custom Worker, import `retainEmail(message, env, { metadata })`,
 `consumeRetainedEmails(batch, env)` and `sweepRetainedEmails(env)` from `src/index.js`.
 Wire the latter two to your queue and scheduled handlers as in the default export.
+For a secondary raw archive, pass `archive: async ({ raw, from, to, key }) => ...`
+to `retainEmail`. It runs after the primary R2 commit with the original MIME bytes;
+`key` is the pending object identity. Its errors or default 10-second timeout are
+logged as `archive_failed_retained` and do not prevent queue delivery. A timed-out
+callback is not canceled. Set `archiveTimeoutMs` to an integer from 1 to 120,000
+milliseconds to fit your host's runtime budget. Treat bytes as read-only and never parse the private
+pending frame to build an archive. The primary R2 write is always mandatory.
 Trusted provider metadata is captured once at receipt, never recomputed on replay.
 The existing `relayEmail` archive callback is best effort and does not enable this
 durable protocol automatically.

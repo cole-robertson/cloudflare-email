@@ -20,7 +20,7 @@ Version **0.2.0**. Ruby 3.2+, Rails 7.2–8.1; Ruby 4.0 is tested with Rails 8.1
 | [Custom ingress (unreleased)](docs/custom-ingress.md) | Reuse authentication, signed metadata, and tenant routing in your existing ingestion pipeline |
 | [Routing diagnostics (unreleased)](docs/routing-diagnostics.md) | Inspect exact-domain DNS and Worker routes without changing infrastructure |
 | [Reusable Worker pipeline (unreleased)](templates/worker/README.md#reuse-the-transport-in-an-existing-worker) | Keep custom backend and archive policies while sharing bounded email forwarding |
-| [Durable inbound delivery (unreleased)](templates/worker/README.md#durable-inbound-delivery-opt-in) | Store incoming mail in R2 and recover Rails outages with queued retries and scheduled recovery |
+| [Durable inbound delivery (unreleased)](templates/worker/README.md#durable-inbound-delivery) | Store incoming mail in R2 and recover Rails outages with queued retries and scheduled recovery |
 | [Routing delivery confirmation (unreleased)](docs/routing-deliveries.md) | Confirm qualifying normal-address deliveries using authenticated Routing analytics |
 | [SQLite tenant databases](docs/activerecord-tenanted.md) | Give each organization its own SQLite database with `activerecord-tenanted` |
 | [Durable outbox](docs/outbox.md) | Detailed setup, callbacks, retries, and recovery |
@@ -215,6 +215,11 @@ Equivalent environment names are `CLOUDFLARE_MANAGEMENT_TOKEN` and `CLOUDFLARE_I
 1. Add the receiving subdomain, for example `in.example.com`, in **Email Routing → apex domain → Settings → Subdomains**. This is a separate onboarding step from sending.
 2. Deploy the environment's Worker and create its route:
 
+First create the private R2 bucket and Queue, then deploy the generated Wrangler
+configuration using the [durable setup guide](templates/worker/docs/durable-inbound.md).
+The Ruby task below updates that provisioned Worker while preserving its bindings.
+It refuses a missing bucket/queue binding or recovery schedule before changing code.
+
 ```sh
 RAILS_ENV=production bin/rails cloudflare:email:deploy_worker URL=https://app.example.com/rails/action_mailbox/cloudflare/inbound_emails
 RAILS_ENV=production bin/rails cloudflare:email:provision_route ADDRESS=support@in.example.com
@@ -238,14 +243,14 @@ The bundled Worker uses v2 signatures by default; missing or v1 signatures are r
 
 Successful ingress storage returns HTTP 200; duplicate storage returns 200 too. The timestamp window limits request age, but is not a one-time replay ledger. Version 2 deduplication includes the exact SMTP recipient, so identical MIME delivered to separate To/Cc/Bcc recipients creates separate inbound records while a retry for the same recipient creates none.
 
-The Worker has a 15-second Rails request timeout and rejects redirects. Its default direct mode calls `message.setReject` on non-2xx responses, timeouts and network failures, so an application outage can reject mail. Enable the optional [durable inbound path](templates/worker/README.md#durable-inbound-delivery-opt-in) to save messages in R2 before acceptance, then retry Rails handoffs through Queues and scheduled recovery. Rails storage acceptance does not guarantee later mailbox-job success. Monitor Rails jobs and Cloudflare Worker logs.
+The Worker has a 15-second Rails request timeout and rejects redirects. Its default [durable inbound path](templates/worker/README.md#durable-inbound-delivery) saves messages in R2 before acceptance, then retries Rails handoffs through Queues and scheduled recovery. Provision the resources before deploying. `INBOUND_DELIVERY_MODE=direct` selects the single-attempt fallback, which can reject mail during an outage; existing retained mail keeps recovering. Rails storage acceptance does not guarantee later mailbox-job success. Monitor Rails jobs and Cloudflare Worker logs.
 
 ### Local development and deployment
 
-Start Rails, then:
+For a simple development tunnel, use the explicit direct fallback. Start Rails, then:
 
 ```sh
-bin/rails cloudflare:email:deploy_worker
+INBOUND_DELIVERY_MODE=direct bin/rails cloudflare:email:deploy_worker
 bin/rails cloudflare:email:dev
 ```
 
@@ -253,7 +258,7 @@ The dev task requires `cloudflared`, refuses environments other than development
 
 For a custom installer `--worker-dir`, pass `SCRIPT=custom-directory/src/index.js` to the Ruby `deploy_worker` task. The installer prints the corresponding command.
 
-Ruby deployment and Wrangler use matching names: `cloudflare-email-ingress-development`, `-staging`, and `-production`. The optional Wrangler path requires Node 22.12+ (or a supported newer version):
+Ruby deployment and Wrangler use matching names: `cloudflare-email-ingress-development`, `-staging`, and `-production`. Initial durable infrastructure deployment uses Wrangler and requires Node 22.12+ (or a supported newer version):
 
 ```sh
 cd cloudflare-worker
