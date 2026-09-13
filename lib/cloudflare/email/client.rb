@@ -2,6 +2,8 @@ require "net/http"
 require "json"
 require "uri"
 require "time"
+require "timeout"
+require "zlib"
 require "cloudflare/email/endpoint"
 
 module Cloudflare
@@ -11,26 +13,38 @@ module Cloudflare
       DEFAULT_RETRIES  = 3
       DEFAULT_TIMEOUT  = 30
       DEFAULT_BACKOFF  = 0.5
+      DEFAULT_MAX_RESPONSE_BYTES = 1_048_576
       MAX_RETRY_AFTER  = 60 # seconds; never sleep longer than this even if server says so
 
       RETRYABLE_NETWORK = [
         Net::OpenTimeout, Net::ReadTimeout, Net::WriteTimeout, Errno::ECONNRESET,
         Errno::ECONNREFUSED, Errno::EHOSTUNREACH, EOFError, SocketError,
-        IOError
+        IOError, Timeout::Error, Net::HTTPBadResponse, Net::HTTPHeaderSyntaxError,
+        OpenSSL::SSL::SSLError, Zlib::Error
       ].freeze
       PRE_SEND_NETWORK = [Net::OpenTimeout, Errno::ECONNREFUSED, Errno::EHOSTUNREACH, SocketError].freeze
 
-      attr_reader :account_id, :base_url, :retries, :timeout, :retry_ambiguous
+      attr_reader :account_id, :base_url, :retries, :timeout, :retry_ambiguous,
+                  :total_timeout, :max_response_bytes
 
       def initialize(account_id:, api_token:, base_url: DEFAULT_BASE_URL,
                      retries: DEFAULT_RETRIES, timeout: DEFAULT_TIMEOUT,
                      initial_backoff: DEFAULT_BACKOFF, max_retry_after: MAX_RETRY_AFTER,
-                     retry_ambiguous: false, logger: nil)
+                     retry_ambiguous: false, logger: nil,
+                     total_timeout: timeout, max_response_bytes: DEFAULT_MAX_RESPONSE_BYTES)
         unless account_id.is_a?(String) && account_id.match?(/\A[a-zA-Z0-9_-]+\z/)
           raise ConfigurationError, "account_id is required and must be a single account identifier"
         end
         unless api_token.is_a?(String) && !api_token.empty? && !api_token.match?(/\s/)
           raise ConfigurationError, "api_token is required and must not contain whitespace"
+        end
+        [[:timeout, timeout], [:total_timeout, total_timeout]].each do |name, value|
+          unless value.is_a?(Numeric) && value.real? && value.finite? && value.positive?
+            raise ConfigurationError, "#{name} must be a finite positive number"
+          end
+        end
+        unless max_response_bytes.is_a?(Integer) && max_response_bytes.positive?
+          raise ConfigurationError, "max_response_bytes must be a positive integer"
         end
 
         @account_id      = account_id
@@ -38,6 +52,8 @@ module Cloudflare
         @base_url        = Endpoint.parse(base_url).to_s.delete_suffix("/")
         @retries         = retries
         @timeout         = timeout
+        @total_timeout   = total_timeout
+        @max_response_bytes = max_response_bytes
         @initial_backoff = initial_backoff
         @max_retry_after = max_retry_after
         @logger          = logger
@@ -143,9 +159,9 @@ module Cloudflare
           do_request(method, uri, body)
         rescue *RETRYABLE_NETWORK => e
           unless PRE_SEND_NETWORK.any? { |type| e.is_a?(type) } || @retry_ambiguous
-            raise NetworkError.new("#{e.message}; delivery outcome is unknown; automatic retry disabled")
+            raise NetworkError.new("provider response could not be read; delivery outcome is unknown; automatic retry disabled"), cause: nil
           end
-          raise NetworkError.new(e.message) if attempts > @retries
+          raise NetworkError.new("provider request could not be completed; request outcome is unknown"), cause: nil if attempts > @retries
           log_retry(attempts, e)
           sleep(backoff); backoff *= 2
           retry
@@ -194,13 +210,32 @@ module Cloudflare
         req["User-Agent"]    = "cloudflare-email-ruby/#{Cloudflare::Email::VERSION}"
         req.body = JSON.generate(body) if body
 
-        response = http.request(req)
-        handle_response(response)
+        raw = +"".b
+        response = nil
+        byte_limit = response_byte_limit(uri)
+        # Bound each network attempt, including trickling headers/body. Parsing,
+        # queue handlers, and database transactions are outside this deadline.
+        Timeout.timeout(@total_timeout) do
+          http.request(req) do |incoming|
+            response = incoming
+            incoming.read_body do |chunk|
+              # Net::HTTP yields decompressed bytes, so compressed expansion is
+              # subject to the same budget. Check before extending the buffer.
+              raise IOError, "provider response exceeds byte limit" if raw.bytesize + chunk.bytesize > byte_limit
+              raw << chunk
+            end
+          end
+        end
+        handle_response(response, raw)
       end
 
-      def handle_response(response)
+      def response_byte_limit(_uri)
+        @max_response_bytes
+      end
+
+      def handle_response(response, raw = response.body)
         status  = response.code.to_i
-        body    = parse_body(response.body)
+        body    = parse_body(raw)
         retry_after = response["Retry-After"]
 
         # Stash Retry-After on the error response so retry logic can use it.
@@ -236,7 +271,7 @@ module Cloudflare
         return {} if raw.nil? || raw.empty?
         JSON.parse(raw)
       rescue JSON::ParserError
-        { "errors" => [{ "message" => raw.to_s[0, 200] }] }
+        { "errors" => [{ "message" => "invalid JSON API response; request outcome is unknown" }] }
       end
 
       def extract_message(body)

@@ -210,7 +210,8 @@ class ClientAdvancedTest < Minitest::Test
     err = assert_raises(Cloudflare::Email::NetworkError) do
       make_client(retries: 0).send(from: "a@b.com", to: "c@d.com", subject: "x", text: "y")
     end
-    assert_match(/ECONNRESET|Connection reset/i, err.message)
+    assert_match(/outcome is unknown/, err.message)
+    assert_nil err.cause
   end
 
   def test_unexpected_status_raises_base_error
