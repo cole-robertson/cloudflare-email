@@ -14,6 +14,8 @@ Deploy the inbound Worker with guided R2/Queue provisioning and secret setup. [P
 the sibling [Mailbox Kit](mailbox-kit/README.md) gem. Existing Cloudflare setup
 continues to work; the core requires no Cloudflare account. This extraction is not
 part of the published 0.3.0 release yet.
+Existing mailbox installations should use the [core upgrade guide](mailbox-kit/docs/upgrading.md)
+to add the inbound lookup index without recreating their tables.
 
 **Sending email?** Start with the [step-by-step Rails guide](docs/getting-started.md).
 **Building a mailbox?** Follow the same guide through receiving, the SQLite-compatible outbox, and delivery tracking.

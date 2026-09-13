@@ -1,5 +1,27 @@
 # Action Mailbox composition verification
 
+## Independent review follow-up
+
+The independent architecture review of `63660eb` confirmed the Rails/core/provider
+split and reproduced a missing inbound membership index with SQLite's query planner.
+The follow-up adds that index to both installers and supplies `mailbox_kit:upgrade`
+for existing schemas. The generator fixture verifies indexed lookup, existing
+membership preservation and repeat application. It passes 4 tests / 27 assertions.
+
+Cloudflare configuration now delegates shared validation to the core, and its
+session behavior is an explicit integration module. Handler overrides retain
+their existing extension point. The short core README links to packaged
+integration and upgrade guides.
+
+After these changes, the full suite passes 289 tests / 1,151 assertions. Package
+verification passes for Rails-free Cloudflare, packaged ingress/outbound/tenancy,
+and an independent Rails consumer without Cloudflare in its bundle.
+
+This is local/package verification, not a Rebulk production rollout. Automatic
+model-owner lifecycle bindings and a universal outbound adapter framework remain
+outside this change. Existing application acceptance, ownership and business
+processing claims must be retained.
+
 Mailbox Kit now treats `ActionMailbox::InboundEmail` as the original email record.
 The kit's `Message` remains an inbox membership with read/archive state; no new
 raw-email table, parser, routing job or processing-status model was introduced.

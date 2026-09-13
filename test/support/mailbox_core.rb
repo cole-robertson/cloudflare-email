@@ -15,6 +15,10 @@ CreateMailboxKitMailboxes.new.migrate(:up)
 class StandaloneMailboxCoreTest < Minitest::Test
   Box = MailboxKit::Mailboxes
 
+  def test_inbound_lookup_is_indexed
+    assert ActiveRecord::Base.connection.index_exists?(:cloudflare_email_mailbox_messages, :inbound_email_id)
+  end
+
   def setup
     [Box::Message, Box::Address, Box::Mailbox, Box::ReceivingDomain].each(&:delete_all)
     @domain = Box.register_domain(domain: "in.example.test", tenant_key: "workspace")

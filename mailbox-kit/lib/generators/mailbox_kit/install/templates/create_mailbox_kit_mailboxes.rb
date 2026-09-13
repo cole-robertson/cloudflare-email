@@ -40,6 +40,7 @@ class CreateMailboxKitMailboxes < ActiveRecord::Migration[7.1]
       t.timestamps
     end
     add_index :cloudflare_email_mailbox_messages, [:mailbox_id, :inbound_email_id], unique: true, name: "idx_cf_email_mailbox_inbound"
+    add_index :cloudflare_email_mailbox_messages, :inbound_email_id, name: "idx_cf_email_message_inbound"
     add_index :cloudflare_email_mailbox_messages, [:tenant_key, :mailbox_id, :archived_at, :id], name: "idx_cf_email_mailbox_inbox"
 
   end

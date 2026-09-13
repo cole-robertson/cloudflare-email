@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Index inbox memberships by inbound email for recipient isolation checks,
+  retention and purge. New schemas include the index; `mailbox_kit:upgrade`
+  generates a data-preserving migration for existing installations.
+- Delegate shared configuration to Mailbox Kit and isolate Cloudflare session
+  additions in an integration module. Provide a short core quickstart plus
+  packaged integration and upgrade guides.
+
 - Lean on Action Mailbox for original email records, processing and configurable
   retention. Add idempotent attachment of existing Rails records and source-based
   receiving that resolves duplicates for inbox membership. Share the persistence

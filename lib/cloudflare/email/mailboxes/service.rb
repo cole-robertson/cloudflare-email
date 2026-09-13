@@ -3,7 +3,9 @@ require "mailbox_kit/mailboxes/service"
 module Cloudflare
   module Email
     module Mailboxes
-      class Session
+      # Provider-specific behavior is installed only when the Cloudflare
+      # integration is explicitly loaded. Core sessions remain receiving-only.
+      module CloudflareSession
         def provision_address!(address_id, provisioner:, worker_name:)
           context!
           raise ArgumentError, "provision outside a database transaction" if Address.connection.transaction_open?
@@ -113,6 +115,7 @@ module Cloudflare
           delivery
         end
       end
+      Session.include(CloudflareSession)
     end
   end
 end
