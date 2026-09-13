@@ -123,6 +123,52 @@ end
 
 See the [mailbox guide](mailboxes.md) for domain activation, address provisioning, sending, and event replay. Your application still authorizes which organization, mailbox, and message each user can access.
 
+## Account emails without an organization
+
+Password resets and portal invitations can belong to the application rather
+than an organization. If you enabled separate tenant databases, give those
+outbox records an explicitly provisioned, host-reserved database too. Keep the
+business record's organization empty; a storage key is not an organization or
+an authorization grant.
+
+For example, after configuring the adapter above, provision and migrate a
+reserved database through your deployment workflow:
+
+```ruby
+# Run once through trusted provisioning, not during sending or event replay.
+TenantRecord.create_tenant("_system_outbound")
+```
+
+Your own service can select storage consistently for sending and feedback:
+
+```ruby
+module EmailStorage
+  SYSTEM_KEY = "_system_outbound".freeze
+
+  def self.with_outbound_storage(organization_key, &block)
+    # The caller must supply an already-authorized organization key.
+    key = organization_key.nil? ? SYSTEM_KEY : organization_key
+    Cloudflare::Email::Tenancy.with(key, &block)
+  end
+end
+
+EmailStorage.with_outbound_storage(nil) do
+  # Prepare/read/reconcile the system email's saved outbox operation here.
+end
+```
+
+Reserve the key against customer selection, include this database in migrations,
+backups and restoration drills, and use the same selection for receipt replay.
+If your shared business records use another database, retain their own durable
+receipt/projection boundary: a tenant commit and a shared commit are not atomic.
+Replay a committed gem operation rather than sending it again.
+
+Never modify the tenancy adapter to treat every missing context as the system
+database. Missing context must continue to fail closed. Your organization's job
+fan-out should enumerate real organizations, not every database file. Applications
+without configured multi-tenancy can keep ordinary system and organization mail
+in their existing single database; this recipe does not enable tenancy by default.
+
 ## What is verified
 
 The optional CI job boots a real Rails application with `activerecord-tenanted`, runs the gem's tenant migrations in two SQLite databases, and checks identical numeric IDs remain isolated. It also verifies context restoration, refusal to create unknown tenant databases, and GlobalID's missing/wrong-tenant rejection. Separate integration tests exercise mailbox ingress, sending, jobs, and delivery-event replay.

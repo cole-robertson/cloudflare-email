@@ -350,6 +350,21 @@ class RailsAppTest < Minitest::Test
       assert_equal before + 1, ActionMailbox::InboundEmail.count
     end
 
+    def test_missing_message_id_replay_on_another_rails_host_is_deduplicated
+      body = "From: sender@example.com\r\nTo: receiver@example.com\r\nSubject: Host-independent replay\r\n\r\nOriginal bytes\r\n"
+      before = ActionMailbox::InboundEmail.count
+      %w[old-pod replacement-pod].each do |hostname|
+        Socket.stub(:gethostname, hostname) do
+          signed_post(body)
+          assert_equal 200, last_response.status, last_response.body
+        end
+      end
+      assert_equal before + 1, ActionMailbox::InboundEmail.count
+      inbound = ActionMailbox::InboundEmail.last
+      assert_equal "#{inbound.message_checksum}@cloudflare-email.invalid", inbound.message_id
+      assert_equal body, inbound.raw_email.download
+    end
+
     def test_invalid_and_stale_signatures_do_not_persist_mail
       before = ActionMailbox::InboundEmail.count
       signed_post("invalid", signature: "0" * 64)

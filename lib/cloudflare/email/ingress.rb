@@ -37,13 +37,27 @@ module Cloudflare
         def persist_action_mailbox!
           ::ActionMailbox::InboundEmail.transaction do
             inbound = ::ActionMailbox::InboundEmail.create_and_extract_message_id!(body,
-              message_checksum: message_checksum)
+              message_checksum: message_checksum, message_id: stable_message_id)
             if inbound
               blob = inbound.raw_email.blob
               blob.update!(metadata: blob.metadata.merge(storage_metadata))
             end
             inbound
           end
+        end
+
+        private
+
+        # ActionMailbox's fallback includes Socket.gethostname. A replay on a
+        # different Rails host must use the same database identity, while the
+        # original MIME stays untouched. Preserve parseable provider IDs.
+        def stable_message_id
+          parsed = begin
+            ::Mail.from_source(body).message_id
+          rescue StandardError
+            nil
+          end
+          parsed || "#{message_checksum}@cloudflare-email.invalid"
         end
       end
 

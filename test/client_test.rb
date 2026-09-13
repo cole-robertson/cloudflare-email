@@ -153,6 +153,7 @@ class ClientTest < Minitest::Test
     err = assert_raises(Cloudflare::Email::ServerError) do
       make_client.send(from: "a@b.com", to: "c@d.com", subject: "x", text: "y")
     end
-    assert_match(/oh no|html/i, err.message)
+    assert_match(/invalid JSON API response/, err.message)
+    refute_match(/oh no|html/i, err.message)
   end
 end

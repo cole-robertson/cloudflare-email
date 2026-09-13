@@ -38,9 +38,12 @@ Dir.mktmpdir("cloudflare-email-package-") do |temporary|
   GEMFILE
   check = <<~RUBY
     require "cloudflare-email"
+    require "cloudflare/email/routing_analytics"
     abort "unexpected Rails dependency" if defined?(Rails) || Gem.loaded_specs.key?("rails")
     abort "wrong gem version" unless Cloudflare::Email::VERSION == #{version.inspect}
     abort "missing event consumer" unless defined?(Cloudflare::Email::EventConsumer)
+    abort "missing optional routing client" unless defined?(Cloudflare::Email::RoutingAnalytics::Client)
+    abort "unexpected Active Record dependency" if defined?(ActiveRecord)
     abort "gem was not installed from the package" unless Gem.loaded_specs.fetch("cloudflare-email").full_gem_path.start_with?(#{File.join(temporary, "installed").inspect})
     puts "PASS: isolated packaged Ruby consumer (no Rails)"
   RUBY
@@ -58,6 +61,7 @@ Dir.mktmpdir("cloudflare-email-package-") do |temporary|
     run!({ "CLOUDFLARE_EMAIL_TEST_GEM_ROOT" => extracted }, RbConfig.ruby,
          File.join(root, "test/support/rails_app.rb"), mode, chdir: root)
   end
+  abort "missing packaged durable Worker guide" unless File.file?(File.join(extracted, "templates/worker/docs/durable-inbound.md"))
   puts "PASS: packaged Rails installation and ingress fixtures"
   run!({ "CLOUDFLARE_EMAIL_TEST_GEM_ROOT" => extracted }, RbConfig.ruby,
        File.join(root, "test/support/outbound_integration.rb"), chdir: root)

@@ -9,9 +9,12 @@ module Cloudflare
     # Handler/parse/ack failures propagate; unacknowledged leases expire and
     # are redelivered according to the queue's retry/dead-letter policy.
     class EventConsumer < Client
-      def initialize(queue_id:, domains: nil, **options)
+      # Up to 100 queue messages, including encoded payloads and metadata.
+      DEFAULT_MAX_RESPONSE_BYTES = 32 * 1_048_576
+
+      def initialize(queue_id:, domains: nil, max_response_bytes: DEFAULT_MAX_RESPONSE_BYTES, **options)
         raise ConfigurationError, "queue_id is required" unless queue_id.to_s.match?(/\A[a-zA-Z0-9_-]+\z/)
-        super(**options.merge(retries: 0, retry_ambiguous: false))
+        super(**options.merge(retries: 0, retry_ambiguous: false, max_response_bytes: max_response_bytes))
         @queue_id = queue_id
         @domains = domains && Array(domains).map(&:downcase)
       end
@@ -53,6 +56,12 @@ module Cloudflare
 
       private
 
+      def response_byte_limit(uri)
+        # ACKs contain counts, never a queue batch. Keep their smaller budget
+        # even when a pull needs room for 100 encoded event payloads.
+        uri.path.end_with?("/messages/ack") ? [@max_response_bytes, Client::DEFAULT_MAX_RESPONSE_BYTES].min : @max_response_bytes
+      end
+
       def queue_path(action)
         "/accounts/#{account_id}/queues/#{@queue_id}/messages/#{action}"
       end
@@ -79,7 +88,7 @@ module Cloudflare
         end
         DeliveryEvent.new(body)
       rescue JSON::ParserError, ArgumentError, TypeError
-        raise ValidationError, "queue body must contain a valid JSON Email Sending event"
+        raise ValidationError, "queue body must contain a valid JSON Email Sending event", cause: nil
       end
     end
   end

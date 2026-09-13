@@ -108,6 +108,9 @@ worker_pid = nil
 begin
   rails_port = available_port
   redirect_followed = false
+  durable_mode = :offline
+  durable_attempts = 0
+  durable_completed = 0
   local_app = lambda do |env|
     case env["PATH_INFO"]
     when "/test-redirect"
@@ -118,6 +121,22 @@ begin
     when "/test-slow"
       sleep 17
       [200, {}, ["slow test response"]]
+    when "/test-durable"
+      durable_attempts += 1
+      durable_response = if durable_mode == :offline
+        [503, {}, ["synthetic outage"]]
+      else
+        env["PATH_INFO"] = "/rails/action_mailbox/cloudflare/inbound_emails"
+        response = Rails.application.call(env)
+        if durable_mode == :lost_response
+          response[2].close if response[2].respond_to?(:close)
+          [503, {}, ["synthetic response lost after commit"]]
+        else
+          response
+        end
+      end
+      durable_completed += 1
+      durable_response
     else
       Rails.application.call(env)
     end
@@ -210,6 +229,83 @@ begin
       stop_process(worker_pid)
       worker_pid = nil
     end
+  end
+  # Exercise the actual R2 and Queue bindings in workerd. This temporary
+  # inspection endpoint is local test code and is never part of the gem Worker.
+  wrapper = "#{LOCAL_ROOT}/durable-worker.js"
+  File.write(wrapper, <<~JS)
+    import worker from #{JSON.generate(worker_source)};
+    export default {
+      ...worker,
+      async fetch(request, env) {
+        if (new URL(request.url).pathname === '/recover') {
+          const tasks = [];
+          worker.scheduled({scheduledTime: Date.now(), cron: '* * * * *'}, env,
+            {waitUntil(task) { tasks.push(task); }});
+          await Promise.all(tasks);
+        }
+        const pending = await env.INBOUND_EMAIL_STORE.list({prefix: 'cloudflare-email/pending/'});
+        return Response.json({pending: pending.objects.length});
+      }
+    };
+  JS
+  File.write("#{LOCAL_ROOT}/wrangler.json", JSON.generate(
+    name: "cloudflare-email-local-verification", main: wrapper,
+    compatibility_date: "2026-09-10", observability: { enabled: false },
+    vars: { DURABLE_INBOUND_ENABLED: "true" },
+    r2_buckets: [{ binding: "INBOUND_EMAIL_STORE", bucket_name: "synthetic-inbound" }],
+    queues: {
+      producers: [{ binding: "INBOUND_EMAIL_QUEUE", queue: "synthetic-inbound" }],
+      consumers: [{ queue: "synthetic-inbound", max_batch_size: 1, max_batch_timeout: 1, max_retries: 0 }],
+    },
+  ))
+  File.write("#{LOCAL_ROOT}/.dev.vars",
+    "RAILS_INGRESS_URL=http://127.0.0.1:#{rails_port}/test-durable\n" \
+    "INGRESS_SECRET=#{ENV.fetch('CLOUDFLARE_INGRESS_SECRET')}\n", perm: 0o600)
+  log_path = "#{LOCAL_ROOT}/wrangler-durable.log"
+  worker_pid = Process.spawn({ "WRANGLER_SEND_METRICS" => "false", "CI" => "true",
+    "CLOUDFLARE_API_TOKEN" => nil, "CLOUDFLARE_ACCOUNT_ID" => nil },
+    node, wrangler, "dev", "--local", "--config", "#{LOCAL_ROOT}/wrangler.json",
+    "--ip", "127.0.0.1", "--port", worker_port.to_s, "--inspector-port", "0",
+    chdir: LOCAL_ROOT, out: log_path, err: [:child, :out], pgroup: true)
+  begin
+    wait_for_http(worker_port, process: worker_pid)
+    [[:offline, "outage"], [:lost_response, "lost-response"]].each do |mode, label|
+      durable_mode = mode
+      durable_attempts = 0
+      durable_completed = 0
+      before = ActionMailbox::InboundEmail.count
+      retained_mime = mime.sub("workerd-local-verification@", "durable-#{label}@")
+      response = http_request(worker_port, body: retained_mime)
+      check(response.is_a?(Net::HTTPSuccess), "durable #{label}: accepts mail while Rails cannot acknowledge")
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 20
+      until durable_completed.positive?
+        raise "queue did not attempt delivery" if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+        sleep 0.1
+      end
+      check(JSON.parse(http_request(worker_port).body).fetch("pending") == 1,
+        "durable #{label}: R2 retains mail after unsuccessful queue handoff")
+      check(ActionMailbox::InboundEmail.count == before + (mode == :offline ? 0 : 1),
+        "durable #{label}: Rails persistence reflects the actual handoff boundary")
+      durable_mode = :online
+      recovered = Net::HTTP.get_response(URI("http://127.0.0.1:#{worker_port}/recover"))
+      check(recovered.is_a?(Net::HTTPSuccess) && JSON.parse(recovered.body).fetch("pending").zero?,
+        "durable #{label}: scheduled recovery drains R2 without relying on queue retries")
+      check(ActionMailbox::InboundEmail.count == before + 1,
+        "durable #{label}: recovery produces exactly one saved Rails message")
+      inbound = ActionMailbox::InboundEmail.find_by!(message_id: "durable-#{label}@example.test")
+      check(inbound.raw_email.download == retained_mime && inbound.mail.attachments.first.decoded == attachment,
+        "durable #{label}: retained MIME and binary attachment survive recovery")
+      Net::HTTP.get_response(URI("http://127.0.0.1:#{worker_port}/recover"))
+      check(ActionMailbox::InboundEmail.count == before + 1,
+        "durable #{label}: repeated recovery does not create another message")
+    end
+  rescue => error
+    warn File.read(log_path)
+    raise error
+  ensure
+    stop_process(worker_pid)
+    worker_pid = nil
   end
   puts "Local workerd-to-Rails verification complete. No email sent and no Worker deployed."
 ensure

@@ -20,6 +20,8 @@ Version **0.2.0**. Ruby 3.2+, Rails 7.2–8.1; Ruby 4.0 is tested with Rails 8.1
 | [Custom ingress (unreleased)](docs/custom-ingress.md) | Reuse authentication, signed metadata, and tenant routing in your existing ingestion pipeline |
 | [Routing diagnostics (unreleased)](docs/routing-diagnostics.md) | Inspect exact-domain DNS and Worker routes without changing infrastructure |
 | [Reusable Worker pipeline (unreleased)](templates/worker/README.md#reuse-the-transport-in-an-existing-worker) | Keep custom backend and archive policies while sharing bounded email forwarding |
+| [Durable inbound delivery (unreleased)](templates/worker/README.md#durable-inbound-delivery-opt-in) | Store incoming mail in R2 and recover Rails outages with queued retries and scheduled recovery |
+| [Routing delivery confirmation (unreleased)](docs/routing-deliveries.md) | Confirm qualifying normal-address deliveries using authenticated Routing analytics |
 | [SQLite tenant databases](docs/activerecord-tenanted.md) | Give each organization its own SQLite database with `activerecord-tenanted` |
 | [Durable outbox](docs/outbox.md) | Detailed setup, callbacks, retries, and recovery |
 | [Delivery events](docs/delivery-events.md) | Cloudflare Queue setup and recipient status tracking |
@@ -236,7 +238,7 @@ The bundled Worker uses v2 signatures by default; missing or v1 signatures are r
 
 Successful ingress storage returns HTTP 200; duplicate storage returns 200 too. The timestamp window limits request age, but is not a one-time replay ledger. Version 2 deduplication includes the exact SMTP recipient, so identical MIME delivered to separate To/Cc/Bcc recipients creates separate inbound records while a retry for the same recipient creates none.
 
-The Worker has a 15-second Rails request timeout and rejects redirects. Non-2xx responses, timeouts, and network failures call `message.setReject`. There is no durable buffering of inbound email: an application outage can reject mail. Storage acceptance does not guarantee later mailbox-job success. Monitor Rails jobs and Cloudflare Worker logs.
+The Worker has a 15-second Rails request timeout and rejects redirects. Its default direct mode calls `message.setReject` on non-2xx responses, timeouts and network failures, so an application outage can reject mail. Enable the optional [durable inbound path](templates/worker/README.md#durable-inbound-delivery-opt-in) to save messages in R2 before acceptance, then retry Rails handoffs through Queues and scheduled recovery. Rails storage acceptance does not guarantee later mailbox-job success. Monitor Rails jobs and Cloudflare Worker logs.
 
 ### Local development and deployment
 
@@ -316,6 +318,8 @@ Cloudflare's current [header documentation](https://developers.cloudflare.com/em
 | `account_id`, `api_token` | Required |
 | `base_url` | `https://api.cloudflare.com/client/v4` |
 | `timeout` | 30 seconds for open/read/write |
+| `total_timeout` | Defaults to `timeout`; bounds one complete HTTP attempt, including headers and streamed body |
+| `max_response_bytes` | 1 MiB for `Client`; 32 MiB for `EventConsumer` queue batches |
 | `retries` | 3 additional attempts |
 | `initial_backoff` | 0.5 seconds, doubling |
 | `max_retry_after` | 60 seconds |
@@ -323,6 +327,14 @@ Cloudflare's current [header documentation](https://developers.cloudflare.com/em
 | `logger` | `nil`, optional `warn` logger |
 
 By default, only 429 responses and pre-send connection failures retry. Numeric and HTTP-date `Retry-After` values are honored up to the cap. Read/write timeouts, connection resets, and 5xx responses may occur after acceptance; they raise without automatically resending. Setting `retry_ambiguous: true` restores retries for those failures and can send duplicates.
+
+Responses are streamed with a byte limit, including decompressed content and
+error responses. A total deadline or response-size failure after transmission
+does not prove a send failed: the outbox preserves the ambiguous claim and blocks
+automatic resend. Net::HTTP's implicit retries are disabled. Explicit retries
+and backoff can make a logical call longer than `total_timeout`; queue handlers,
+database transactions and a complete polling run have separate runtime budgets.
+An uncertain queue acknowledgement permits receipt replay, never email resending.
 
 No idempotency key is sent. Reusing Message-ID does not guarantee deduplication or exactly-once delivery. Account for ActiveJob's retry policy too: retrying the whole mailer job can resend even when this client's retries are disabled.
 

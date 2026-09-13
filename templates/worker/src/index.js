@@ -295,6 +295,131 @@ export async function forwardEmail(message, env, { metadata } = {}) {
     else if (delivery.reason === "http_status") message.setReject(`upstream returned ${delivery.httpStatus}`);
 }
 
+const PENDING_PREFIX = "cloudflare-email/pending/";
+const CURSOR_KEY = "cloudflare-email/state/sweep";
+
+function durableConfig(env) {
+  if (!env.INBOUND_EMAIL_STORE || !env.INBOUND_EMAIL_QUEUE ||
+      !validIngressUrl(env.RAILS_INGRESS_URL) || !env.INGRESS_SECRET) {
+    throw new Error("durable inbound configuration invalid");
+  }
+  const limit = Number(env.MAX_EMAIL_BYTES ?? 25 * 1024 * 1024);
+  if (!Number.isSafeInteger(limit) || limit <= 0) throw new Error("invalid inbound size limit");
+  return limit;
+}
+
+function durableLog(reason, key, httpStatus) {
+  console.warn(JSON.stringify({ component: "cloudflare_email_inbound", reason, key,
+    ...(httpStatus === undefined ? {} : { httpStatus }) }));
+}
+
+// One atomic R2 object holds both the original bytes and stable signed context.
+// Queue messages are disposable wakeups; pending objects are the source of truth.
+export async function retainEmail(message, env, { metadata } = {}) {
+  const limit = durableConfig(env);
+  if (!validAddress(message.from, true) || !validAddress(message.to)) {
+    message.setReject("worker received invalid SMTP envelope");
+    return;
+  }
+  if (metadata !== undefined) encodeMetadata(metadata);
+  let raw;
+  try {
+    if (message.rawSize > limit) {
+      message.setReject("message exceeds size limit");
+      return;
+    }
+    raw = await readBounded(message.raw, limit);
+  } catch (error) {
+    if (error?.code !== "EMAIL_TOO_LARGE") throw new Error("inbound message read failed");
+    message.setReject("message exceeds size limit");
+    return;
+  }
+  const key = `${PENDING_PREFIX}${crypto.randomUUID()}`;
+  const context = new TextEncoder().encode(JSON.stringify({ version: 1,
+    from: message.from, to: message.to, metadata, receivedAt: new Date().toISOString() }));
+  const stored = new Uint8Array(4 + context.length + raw.length);
+  new DataView(stored.buffer).setUint32(0, context.length);
+  stored.set(context, 4);
+  stored.set(raw, 4 + context.length);
+  try {
+    // Deliberately awaited, never waitUntil or a best-effort archive.
+    await env.INBOUND_EMAIL_STORE.put(key, stored,
+      { httpMetadata: { contentType: "application/octet-stream" } });
+  } catch {
+    durableLog("storage_failed", key);
+    throw new Error("inbound durable storage unavailable");
+  }
+  try { await env.INBOUND_EMAIL_QUEUE.send({ version: 1, key }); }
+  catch { durableLog("enqueue_failed_retained", key); }
+  return { key };
+}
+
+export async function deliverRetainedEmail(key, env) {
+  const limit = durableConfig(env);
+  if (typeof key !== "string" || !/^cloudflare-email\/pending\/[0-9a-f-]{36}$/.test(key)) {
+    throw new Error("invalid retained email key");
+  }
+  const bucket = env.INBOUND_EMAIL_STORE;
+  // A previous successful attempt may have deleted the pending object already.
+  const object = await bucket.get(key);
+  if (!object) return;
+  if (object.size > limit + 32772) throw new Error("retained email exceeds configured size");
+  const stored = await readBounded(object.body, limit + 32772);
+  if (stored.length < 4) throw new Error("invalid retained email");
+  const length = new DataView(stored.buffer, stored.byteOffset).getUint32(0);
+  if (length > 32768 || length > stored.length - 4) throw new Error("invalid retained email context");
+  const context = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(stored.subarray(4, 4 + length)));
+  const raw = stored.subarray(4 + length);
+  if (context.version !== 1 || raw.length > limit) throw new Error("invalid retained email version or size");
+  const headers = await signedEmailHeaders({ secret: env.INGRESS_SECRET, raw,
+    from: context.from, to: context.to, metadata: context.metadata });
+  const result = await postEmail(env.RAILS_INGRESS_URL, headers, raw, 15_000);
+  if (result.reason !== "delivered") {
+    durableLog(result.reason, key, result.httpStatus);
+    throw new Error("inbound handoff incomplete");
+  }
+  // Delete only after Rails durable acceptance. A lost response or failed delete
+  // leaves the identical object available for idempotent replay, never rewrites it.
+  await bucket.delete(key);
+}
+
+export async function consumeRetainedEmails(batch, env) {
+  for (const message of batch.messages) {
+    try {
+      if (message.body?.version !== 1) throw new Error("invalid queue pointer");
+      await deliverRetainedEmail(message.body.key, env);
+      message.ack();
+    } catch {
+      durableLog("queue_retry_retained", typeof message.body?.key === "string" &&
+        /^cloudflare-email\/pending\/[0-9a-f-]{36}$/.test(message.body.key) ? message.body.key : undefined);
+      message.retry({ delaySeconds: 300 });
+    }
+  }
+}
+
+export async function sweepRetainedEmails(env) {
+  durableConfig(env);
+  const bucket = env.INBOUND_EMAIL_STORE;
+  const state = await bucket.get(CURSOR_KEY);
+  const cursor = state ? await state.text() : undefined;
+  // Five attempts fit comfortably within the scheduled handler's wall-time cap.
+  // Advance even over poison entries; the next traversal retries them again.
+  const page = await bucket.list({ prefix: PENDING_PREFIX, limit: 5,
+    ...(cursor ? { cursor } : {}) });
+  for (const object of page.objects) {
+    try { await deliverRetainedEmail(object.key, env); }
+    catch { durableLog("sweep_retry_retained", object.key); }
+  }
+  if (page.truncated) await bucket.put(CURSOR_KEY, page.cursor);
+  else await bucket.delete(CURSOR_KEY);
+}
+
 export default {
-  email(message, env) { return forwardEmail(message, env); },
+  email(message, env) {
+    return env.DURABLE_INBOUND_ENABLED === "true" ? retainEmail(message, env) : forwardEmail(message, env);
+  },
+  queue(batch, env) { return consumeRetainedEmails(batch, env); },
+  scheduled(_event, env, ctx) {
+    if (env.DURABLE_INBOUND_ENABLED === "true") ctx.waitUntil(sweepRetainedEmails(env));
+  },
 };

@@ -102,6 +102,7 @@ jobs:
       - run: npm audit --audit-level=high
       - run: npm test
       - run: npm run check
+      - run: node ../../script/verify_durable_capacity.mjs
 
   local-ingress:
     name: Local workerd → Rails ingress
