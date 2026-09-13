@@ -26,7 +26,7 @@ Pause test ingress while updating Rails and the deployed Worker together; verify
 the matching ingress URL and shared secret before resuming delivery. There is no
 legacy routing mode or supported mixed-version rollout.
 
-The unreleased custom-ingress additions preserve v2 as the default and add
+The 0.3 custom-ingress additions preserve v2 as the default and add
 opt-in v3 for authenticated Worker metadata. That additive upgrade is separate
 from the v1-to-v2 break above: upgrade the Rails receiver before enabling v3 in
 your custom Worker. See [custom ingestion](custom-ingress.md).

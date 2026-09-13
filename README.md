@@ -2,7 +2,7 @@
 
 Ruby client for [Cloudflare Email Service](https://developers.cloudflare.com/email-service/), with ActionMailer, authenticated ActionMailbox ingress, a forwarding Worker, and optional durable Rails sending and delivery-event tracking.
 
-Version **0.2.0**. Ruby 3.2+, Rails 7.2–8.1; Ruby 4.0 is tested with Rails 8.1. Supported test floors are Rails 7.2.3.2, 8.0.5.1, and 8.1.3.1. Prefer a maintained Ruby/Rails release for new applications. The plain Ruby client uses Ruby's standard libraries plus the Base64 gem. Node is optional: Worker deployment also works through the included Ruby deployer. See [security guidance](SECURITY.md) for deployment responsibilities.
+Version **0.3.0**. Ruby 3.2+, Rails 7.2–8.1; Ruby 4.0 is tested with Rails 8.1. Supported test floors are Rails 7.2.3.2, 8.0.5.1, and 8.1.3.1. Prefer a maintained Ruby/Rails release for new applications. The plain Ruby client uses Ruby's standard libraries plus the Base64 gem. Node is optional: Worker deployment also works through the included Ruby deployer. See [security guidance](SECURITY.md) for deployment responsibilities.
 
 ## Start here
 
@@ -25,16 +25,16 @@ Version **0.2.0**. Ruby 3.2+, Rails 7.2–8.1; Ruby 4.0 is tested with Rails 8.1
 | [SQLite tenant databases](docs/activerecord-tenanted.md) | Give each organization its own SQLite database with `activerecord-tenanted` |
 | [Durable outbox](docs/outbox.md) | Detailed setup, callbacks, retries, and recovery |
 | [Delivery events](docs/delivery-events.md) | Cloudflare Queue setup and recipient status tracking |
-| [Upgrading to 0.2](docs/upgrading-0.2.md) | Changes needed for an existing installation |
+| [Upgrading to 0.3](docs/upgrading-0.3.md) | Changes needed for an existing installation |
 
 The sections below are the configuration and API reference.
 
 ## Install and send from Rails
 
-Add version 0.2 to your Gemfile. Existing 0.1 users should follow the [upgrade guide](docs/upgrading-0.2.md), including the coordinated Rails/Worker update:
+Add version 0.3 to your Gemfile. Existing users should follow the [upgrade guide](docs/upgrading-0.3.md), especially before deploying the durable Worker:
 
 ```ruby
-gem "cloudflare-email", "~> 0.2.0"
+gem "cloudflare-email", "~> 0.3.0"
 ```
 
 ```sh
