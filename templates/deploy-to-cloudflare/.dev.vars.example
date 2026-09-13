@@ -1,0 +1,3 @@
+# Supply these in the Cloudflare deployment form. Never commit real values.
+RAILS_INGRESS_URL=
+INGRESS_SECRET=

@@ -5,7 +5,7 @@ services. You can use just the sending client, add incoming mail, or build a
 mailbox on top of the optional database-backed delivery tools.
 
 Start with [Getting started](getting-started.md) for working examples. These
-features are available in **0.2.0**. Database multi-tenancy is **off by default**:
+features are available in **0.3.0**. Database multi-tenancy is **off by default**:
 the optional mailbox module works in one database unless you explicitly configure
 a tenant connection adapter. A mailbox tenant key alone does not switch databases.
 
@@ -29,7 +29,7 @@ a tenant connection adapter. A mailbox tenant key alone does not switch database
 | Observe email processing | ActiveSupport notifications + `doctor` | Send/ingress/event/outbox instrumentation and configuration diagnostics |
 | Deploy receiving infrastructure | Ruby deployer and routing tasks | Environment-specific Workers, ingress secrets, address routes and DNS preflight checks |
 
-## Upcoming integration tools (unreleased)
+## Integration tools
 
 [Durable inbound delivery](../templates/worker/README.md#durable-inbound-delivery)
 saves raw email and its envelope in R2 before the Worker returns successfully.

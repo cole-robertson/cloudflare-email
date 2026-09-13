@@ -7,6 +7,10 @@ If you are upgrading from 0.1, complete the [0.2 upgrade](upgrading-0.2.md) too.
 
 ## Receiving mail while Rails is down
 
+New installations can use the [Deploy to Cloudflare template](../templates/deploy-to-cloudflare/README.md)
+to provision the Worker resources through Cloudflare's setup form. Existing
+installations should preserve their resources and pending mail using the steps below.
+
 The bundled Worker now stores inbound mail in private R2 before accepting it,
 then delivers through a Queue with scheduled recovery. Before deploying it:
 

@@ -4,6 +4,10 @@
 
 See [upgrading from 0.2](docs/upgrading-0.3.md) before deploying the updated Worker.
 
+- Add a standalone Deploy to Cloudflare template with R2/Queue provisioning,
+  secret prompts, scheduled recovery, and logs. CI checks runtime/configuration
+  synchronization with the gem's Worker and tests an isolated template copy.
+
 - Make durable inbound delivery the Worker default, with explicit direct fallback: commit original mail and envelope context
   to R2 before Worker acceptance, deliver queue pointers with fresh signatures,
   and recover pending mail through a bounded scheduled sweep. Rails errors,

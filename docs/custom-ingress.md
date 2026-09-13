@@ -1,6 +1,6 @@
 # Use your existing inbound email pipeline
 
-This integration API is unreleased and is not included in gem version 0.2.0.
+This integration API is available in gem version 0.3.0.
 
 You can adopt mailbox registration without replacing your Worker, document processing, sender review, or archive. Use the gem to authenticate the request and resolve an accepted address, then keep your application's policy and processing.
 

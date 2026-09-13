@@ -6,6 +6,11 @@ gem.
 
 ## Deploy
 
+For a guided dashboard deployment that provisions resources and prompts for
+secrets, use the [Deploy to Cloudflare template](../deploy-to-cloudflare/README.md).
+It uses this same Worker with a standalone configuration. The CLI setup below
+is for the explicitly named development/staging/production environments.
+
 ```sh
 npm ci
 npx wrangler r2 bucket create cloudflare-email-inbound-production

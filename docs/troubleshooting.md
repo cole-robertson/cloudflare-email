@@ -30,7 +30,7 @@ FROM=hello@mail.example.com TO=you@example.net bin/rails cloudflare:email:send_t
 | --- | --- |
 | Address receives nothing | Verify receiving-subdomain onboarding and the address route's Worker. Sending-domain verification is separate. |
 | Route provisioning refuses a subdomain | Complete Email Routing subdomain setup and DNS preflight first. Do not enable or replace apex routing just to bypass the error. |
-| Worker reports 401 from Rails | Check matching ingress secrets and compatible signature versions. The Worker defaults to v2. The unreleased opt-in v3 [custom-ingress API](custom-ingress.md) requires upgrading Rails before enabling Worker metadata. |
+| Worker reports 401 from Rails | Check matching ingress secrets and compatible signature versions. The Worker defaults to v2. The opt-in v3 [custom-ingress API](custom-ingress.md) requires upgrading Rails before enabling Worker metadata. |
 | Worker reports 408 | Check clock accuracy and the five-minute signing window. |
 | Worker reports 413 or rejects size | Raw MIME exceeds the configured limit. Match `MAX_EMAIL_BYTES` on Rails and Worker and check upstream request limits. |
 | Worker reports 3xx | Point it directly at the final HTTPS ingress URL; redirects are intentionally rejected. |

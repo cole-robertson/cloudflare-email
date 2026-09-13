@@ -5,7 +5,7 @@ mail into them, track read/archive state, and send through the durable outbox.
 It works in one SQLite database or with a separate database per organization.
 It supplies models and services; your app supplies permissions and the UI.
 
-This module is available in version 0.2.0. Install `gem "cloudflare-email", "~> 0.2.0"`.
+This module is available since version 0.2.0. Install `gem "cloudflare-email", "~> 0.3.0"` for the latest features.
 
 **Database multi-tenancy is off by default.** The mailbox generator works with
 one ordinary database. Calling `for_tenant` groups and scopes mailbox records;
@@ -149,7 +149,7 @@ your mailbox-management policy before creation.
 
 ## Receive unregistered local parts with an optional catch-all
 
-Catch-all receiving is **off by default** and is available in the unreleased
+Catch-all receiving is **off by default** and is available in the 0.3
 version. It lets one existing address receive otherwise unregistered addresses
 on its exact domain, without creating an alias row for each incoming local part.
 For example, `anything@acme.example.com` can arrive in an existing support mailbox.
