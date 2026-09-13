@@ -68,6 +68,20 @@ class DeliveryMethodTest < Minitest::Test
     assert_requested(stub)
   end
 
+  def test_rails_settings_enforce_response_byte_budget_without_resending
+    ActionMailer::Base.cloudflare_settings.merge!(max_response_bytes: 16, retries: 3)
+    request = stub_request(:post, send_raw_endpoint)
+      .to_return(status: 200, body: JSON.generate(cloudflare_success_body))
+    assert_raises(Cloudflare::Email::NetworkError) { TestMailer.hello(to: "user@example.com").deliver_now }
+    assert_requested request, times: 1
+  end
+
+  def test_rails_settings_validate_explicit_total_deadline
+    ActionMailer::Base.cloudflare_settings[:total_timeout] = 0
+    assert_raises(Cloudflare::Email::ConfigurationError) { TestMailer.hello(to: "user@example.com").deliver_now }
+    assert_not_requested :post, send_raw_endpoint
+  end
+
   def test_raises_when_no_from
     method = Cloudflare::Email::DeliveryMethod.new(
       account_id: ACCOUNT_ID, api_token: API_TOKEN, retries: 0
