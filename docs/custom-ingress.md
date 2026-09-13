@@ -42,6 +42,10 @@ class InboundEmailsController < ActionController::API
 
     verified = result.message
 
+    # If no custom acceptance/processing record is needed, this is sufficient:
+    # verified.receive_into_mailbox!
+    # It also repairs missing membership on duplicate delivery without rerouting.
+
     Cloudflare::Email::Mailboxes.receive(
       recipient: verified.envelope.fetch("to")
     ) do |destination|
@@ -64,7 +68,7 @@ Mount this controller at your own route and point your existing Worker there. Th
 
 Do not use the MIME `To` header or an unauthenticated URL subdomain to select storage. `verified.envelope.fetch("to")` is the signed SMTP recipient. `Mailboxes.receive` checks that its domain, mailbox, and accepted address are active before entering the persistence block.
 
-`persist_action_mailbox!` stores the verified raw bytes and metadata in Action Mailbox. The receiving block adds mailbox membership in the same tenant transaction. Rails schedules normal routing after the transaction commits. Apply policies that must stop processing before calling persistence; a check performed after receiving returns can be too late.
+`persist_action_mailbox!` delegates verified raw bytes and metadata to the core's Rails persistence bridge. It preserves the existing new-record-or-`nil` return convention; the block example therefore does no new work for a duplicate. The default `receive_into_mailbox!` bridge also attaches the existing record, repairing a missing membership without reprocessing. Rails schedules normal routing only for newly created records after the transaction commits. Apply policies that must stop processing before calling persistence; a check performed after receiving returns can be too late.
 
 For an application that owns a different raw-email store, use `verified.body`, `verified.envelope`, `verified.provider_metadata`, `verified.message_checksum`, and `verified.storage_metadata` with your own persistence/transaction system. `Mailboxes.receive` specifically expects an Action Mailbox inbound email record (or nil) from its block; do not pass an unrelated processing record. The gem does not choose your archive retention, held-message model, or document queue.
 

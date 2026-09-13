@@ -1,18 +1,11 @@
+require "mailbox_kit/error"
+
 module Cloudflare
   module Email
-    class Error < StandardError
-      attr_reader :response, :status
-
-      def initialize(message = nil, status: nil, response: nil)
-        super(message)
-        @status   = status
-        @response = response
-      end
-    end
-
-    class ConfigurationError < Error; end
+    Error = MailboxKit::Error
+    ConfigurationError = MailboxKit::ConfigurationError
     class AuthenticationError < Error; end
-    class ValidationError < Error; end
+    ValidationError = MailboxKit::ValidationError
     class RateLimitError < Error; end
     class ServerError < Error; end
     class NetworkError < Error; end

@@ -56,6 +56,7 @@ Gem::Specification.new do |spec|
   spec.require_paths = ["lib"]
 
   # Base64 is a bundled rather than default gem on recent Ruby versions.
+  spec.add_dependency "mailbox-kit", "~> 0.1.0"
   spec.add_dependency "base64", ">= 0.2", "< 1.0"
 
   spec.add_development_dependency "minitest", "~> 5.20"

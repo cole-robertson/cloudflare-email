@@ -4,6 +4,7 @@ require "active_record"
 require "tmpdir"
 require "generators/cloudflare/email/mailboxes/mailboxes_generator"
 require "generators/cloudflare/email/mailboxes/catch_all/catch_all_generator"
+require "generators/mailbox_kit/upgrade/upgrade_generator"
 
 class MailboxGeneratorInstallationTest < Minitest::Test
   Generator = Cloudflare::Email::Generators::MailboxesGenerator
@@ -16,6 +17,7 @@ class MailboxGeneratorInstallationTest < Minitest::Test
       assert_equal 5, files.map { |path| File.basename(path).split("_").first }.uniq.length
       migrate(File.join(dir, "db/migrate"), File.join(dir, "single.sqlite3"))
       assert ActiveRecord::Base.connection.table_exists?(:cloudflare_email_mailbox_messages)
+      assert_inbound_lookup_uses_index
       assert ActiveRecord::Base.connection.table_exists?(:cloudflare_email_provider_correlations)
       assert ActiveRecord::Base.connection.table_exists?(:cloudflare_email_event_receipts)
       assert ActiveRecord::Base.connection.column_exists?(:cloudflare_email_addresses, :catch_all, :boolean)
@@ -68,6 +70,36 @@ class MailboxGeneratorInstallationTest < Minitest::Test
       assert ActiveRecord::Base.connection.index_exists?(:cloudflare_email_addresses, :receiving_domain_id, name: "idx_cf_email_domain_catch_all")
       AddCloudflareEmailCatchAll.new.migrate(:up)
       assert_equal 1, ActiveRecord::Base.connection.select_value("SELECT COUNT(*) FROM cloudflare_email_addresses")
+    end
+  end
+
+  private
+
+  def assert_inbound_lookup_uses_index
+    plan = ActiveRecord::Base.connection.select_all(
+      "EXPLAIN QUERY PLAN SELECT 1 FROM cloudflare_email_mailbox_messages WHERE inbound_email_id = 42 AND tenant_key != 'workspace' LIMIT 1"
+    ).map { |row| row.fetch("detail") }.join(" ")
+    assert_match(/USING INDEX idx_cf_email_message_inbound/, plan)
+  end
+
+  public
+
+  def test_upgrade_preserves_memberships_and_supports_existing_and_fresh_schemas
+    Dir.mktmpdir do |dir|
+      Generator.start(["--quiet"], destination_root: dir)
+      path = File.join(dir, "db/migrate")
+      database = File.join(dir, "upgrade.sqlite3")
+      migrate(path, database)
+      connection = ActiveRecord::Base.connection
+      connection.remove_index(:cloudflare_email_mailbox_messages, name: "idx_cf_email_message_inbound")
+      connection.execute("INSERT INTO cloudflare_email_mailboxes (id, tenant_key, name, created_at, updated_at) VALUES (1, 'one', 'Existing', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)")
+      connection.execute("INSERT INTO cloudflare_email_mailbox_messages (tenant_key, mailbox_id, inbound_email_id, recipient, created_at, updated_at) VALUES ('one', 1, 42, 'old@example.com', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)")
+      MailboxKit::Generators::UpgradeGenerator.start(["--quiet"], destination_root: dir)
+      migrate(path, database)
+      assert_inbound_lookup_uses_index
+      assert_equal "old@example.com", connection.select_value("SELECT recipient FROM cloudflare_email_mailbox_messages")
+      IndexMailboxKitInboundMessages.new.migrate(:up)
+      assert_equal 1, connection.select_value("SELECT COUNT(*) FROM cloudflare_email_mailbox_messages")
     end
   end
 

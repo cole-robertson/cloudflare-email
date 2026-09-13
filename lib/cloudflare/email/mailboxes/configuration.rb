@@ -1,28 +1,23 @@
-require "active_record"
+require "mailbox_kit/mailboxes/configuration"
 require "cloudflare/email/error"
 
 module Cloudflare
   module Email
+    Mailboxes = MailboxKit::Mailboxes unless const_defined?(:Mailboxes, false)
     module Mailboxes
-      class Unavailable < Cloudflare::Email::Error; end
 
-      class << self
+      module CloudflareConfiguration
         def configure(directory_base: ::ActiveRecord::Base, client_resolver: nil)
-          if const_defined?(:ReceivingDomain, false)
-            raise ConfigurationError, "configure mailboxes before loading mailbox models"
-          end
-          unless directory_base.is_a?(Class) && directory_base <= ::ActiveRecord::Base
-            raise ConfigurationError, "directory_base must be an ActiveRecord base class"
-          end
           if client_resolver && !client_resolver.respond_to?(:call)
             raise ConfigurationError, "client_resolver must be callable"
           end
-          @directory_base = directory_base
+          super(directory_base: directory_base)
           @client_resolver = client_resolver
         end
+      end
+      singleton_class.prepend(CloudflareConfiguration)
 
-        def directory_base = @directory_base || ::ActiveRecord::Base
-
+      class << self
         def delivery_handler = rails_setting(:outbox_delivery_handler)
         def recipient_handler = rails_setting(:outbox_recipient_handler)
 
@@ -41,9 +36,6 @@ module Cloudflare
           end
           client
         end
-
-        def enabled? = @enabled == true
-        def enable! = @enabled = true
 
         private
 

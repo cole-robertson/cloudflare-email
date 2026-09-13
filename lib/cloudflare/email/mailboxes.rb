@@ -9,3 +9,4 @@ require "cloudflare/email/mailboxes/service"
 require "cloudflare/email/mailboxes/jobs"
 
 Cloudflare::Email::Mailboxes.enable!
+require "mailbox_kit/railtie" if defined?(::Rails::Railtie)

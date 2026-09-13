@@ -48,11 +48,12 @@ class ManagementEngineTest < Minitest::Test
   end
 
   def test_management_templates_are_packaged
-    specification = Gem::Specification.load(File.expand_path("../cloudflare-email.gemspec", __dir__))
-    templates = Dir["app/views/cloudflare/email/management/**/*.erb", "app/views/layouts/cloudflare/email/management.html.erb",
-      "lib/cloudflare/email/management/*.css"]
-    refute_empty templates
-    assert_empty templates - specification.files
+    Dir.chdir(File.expand_path("../mailbox-kit", __dir__)) do
+      specification = Gem::Specification.load("mailbox-kit.gemspec")
+      templates = Dir["app/views/**/*.erb", "lib/mailbox_kit/management/*.css"]
+      refute_empty templates
+      assert_empty templates - specification.files
+    end
   end
 
   def test_direct_management_require_without_active_record_eager_loads_and_returns_unavailable
@@ -77,7 +78,8 @@ class ManagementEngineTest < Minitest::Test
       begin
         ManagementWithoutRecordsFixture.initialize!
         abort "ActiveRecord unexpectedly loaded" if defined?(ActiveRecord)
-        abort "mailbox persistence unexpectedly enabled" if defined?(Cloudflare::Email::Mailboxes)
+        abort "mailbox persistence unexpectedly enabled" if Cloudflare::Email::Mailboxes.enabled?
+        abort "mailbox models unexpectedly loaded" if defined?(Cloudflare::Email::Mailboxes::Mailbox)
         abort "core engine missing" unless defined?(Cloudflare::Email::Engine)
         Rails.application.routes.draw do
           mount Cloudflare::Email::Management::Engine => "/email"

@@ -8,6 +8,8 @@ module Cloudflare
         isolate_namespace Cloudflare::Email::Management
         config.root = File.expand_path("../../../..", __dir__)
 
+        config.paths["app/views"] << File.join(MailboxKit::ROOT, "app/views")
+
         config.paths["config/routes.rb"] = "lib/cloudflare/email/management/routes.rb"
       end
     end

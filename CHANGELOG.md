@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- Index inbox memberships by inbound email for recipient isolation checks,
+  retention and purge. New schemas include the index; `mailbox_kit:upgrade`
+  generates a data-preserving migration for existing installations.
+- Delegate shared configuration to Mailbox Kit and isolate Cloudflare session
+  additions in an integration module. Provide a short core quickstart plus
+  packaged integration and upgrade guides.
+
+- Lean on Action Mailbox for original email records, processing and configurable
+  retention. Add idempotent attachment of existing Rails records and source-based
+  receiving that resolves duplicates for inbox membership. Share the persistence
+  bridge with Cloudflare while preserving its signed delivery identity and legacy
+  duplicate return value. Reuse Rails' model load hook for selective retention.
+
+- Extract provider-neutral mailbox storage, recipient routing, optional tenancy,
+  raw-message retention, Rails job context and the server-rendered UI into the
+  sibling `mailbox-kit` gem. Cloudflare APIs, Worker transport, sending outbox and
+  delivery feedback remain in `cloudflare-email`. Preserve existing table names,
+  public constants, job payload keys and mounted Cloudflare engine routes.
+  See [Mailbox Kit](mailbox-kit/README.md) for standalone setup and release order.
+
 - Add a cited one-time domain setup guide for both receiving domains and dynamic
   organization subdomains, shared between Worker templates. Add a read-only
   `npm run check:subdomains` DNS helper with named/fresh probes and explicit limits

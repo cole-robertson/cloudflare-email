@@ -1,4 +1,5 @@
 require "rails/engine"
+require "mailbox_kit/railtie"
 require "cloudflare/email/dev_ingress_guard"
 
 # Register the delivery method at engine load time (not inside an initializer)
@@ -16,19 +17,6 @@ module Cloudflare
 
       initializer "cloudflare-email.development_ingress_guard" do |app|
         app.middleware.insert_before 0, DevIngressGuard if Rails.env.development?
-      end
-
-      config.to_prepare do
-        if (defined?(Cloudflare::Email::Tenancy) && Cloudflare::Email::Tenancy.enabled?) ||
-            (defined?(Cloudflare::Email::Mailboxes) && Cloudflare::Email::Mailboxes.enabled?)
-          require "cloudflare/email/tenant_job_context"
-          Cloudflare::Email::TenantJobContext.install_framework_jobs!
-        end
-        if defined?(Cloudflare::Email::Mailboxes) && Cloudflare::Email::Mailboxes.enabled? && defined?(::ActionMailbox::Engine)
-          require "cloudflare/email/mailboxes/inbound_retention"
-          ::ActionMailbox::InboundEmail.prepend(Cloudflare::Email::Mailboxes::InboundRetention) unless
-            ::ActionMailbox::InboundEmail.ancestors.include?(Cloudflare::Email::Mailboxes::InboundRetention)
-        end
       end
 
       config.before_initialize do
