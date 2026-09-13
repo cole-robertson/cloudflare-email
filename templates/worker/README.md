@@ -171,7 +171,7 @@ export default {
       }),
     });
     // Example host policy: permanent rejection only for invalid/unaccepted mail;
-    // throw for delivery failures so Cloudflare can apply its retry behavior.
+    // Throwing surfaces failure; do not assume Cloudflare retries SMTP delivery.
     if (outcome.status === "rejected") message.setReject("email not accepted");
     if (outcome.status === "failed") throw new Error("email relay unavailable");
   },
@@ -227,6 +227,15 @@ ASCII-safe `from`, `to` and `size` custom metadata; non-ASCII envelope character
 become `?` in this display metadata only. Retention, unique keys, archive browsing
 and recovery authorization belong to the host. Rails email persistence starts
 after delivery and does not replace this optional outage archive.
+
+## Keep inbound mail while Rails is unavailable
+
+Enable the optional [durable inbound mode](./docs/durable-inbound.md) to commit
+each accepted message to R2 before the Email Worker returns. A Queue delivers
+small pointers to that storage; scheduled recovery also retries retained messages
+when queue delivery is exhausted or enqueueing failed. Rails outages, timeouts,
+and non-2xx responses leave the original bytes available for later delivery.
+This is off by default and requires explicitly provisioning the bindings and cron.
 
 ## Validate changes
 
