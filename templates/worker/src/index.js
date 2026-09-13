@@ -318,9 +318,12 @@ function durableLog(reason, key, httpStatus) {
 
 // One atomic R2 object holds both the original bytes and stable signed context.
 // Queue messages are disposable wakeups; pending objects are the source of truth.
-export async function retainEmail(message, env, { metadata, archive } = {}) {
+export async function retainEmail(message, env, { metadata, archive, archiveTimeoutMs = 10_000 } = {}) {
   const limit = durableConfig(env);
   if (archive !== undefined && typeof archive !== "function") throw new Error("invalid inbound archive callback");
+  if (!Number.isSafeInteger(archiveTimeoutMs) || archiveTimeoutMs <= 0 || archiveTimeoutMs > 120_000) {
+    throw new Error("inbound archive timeout must be an integer from 1 to 120000 milliseconds");
+  }
   if (!validAddress(message.from, true) || !validAddress(message.to)) {
     message.setReject("worker received invalid SMTP envelope");
     return;
@@ -356,7 +359,7 @@ export async function retainEmail(message, env, { metadata, archive } = {}) {
   // A secondary archive receives the public raw/context contract, never the
   // private storage frame. Its failure cannot undo the primary durable write.
   if (archive) {
-    try { await archiveWithin(archive, { raw, from: message.from, to: message.to, key }, 10_000); }
+    try { await archiveWithin(archive, { raw, from: message.from, to: message.to, key }, archiveTimeoutMs); }
     catch { durableLog("archive_failed_retained", key); }
   }
   try { await env.INBOUND_EMAIL_QUEUE.send({ version: 1, key }); }

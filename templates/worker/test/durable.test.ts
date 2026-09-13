@@ -95,6 +95,24 @@ describe("durable inbound", () => {
     expect(JSON.stringify(vi.mocked(console.warn).mock.calls)).not.toContain("private archive error");
   });
 
+  it("honors the host archive deadline without delaying durable queue delivery", async () => {
+    const { env } = setup();
+    vi.useFakeTimers();
+    const pending = retainEmail(message(), env, {
+      archive: () => new Promise(() => {}), archiveTimeoutMs: 5,
+    });
+    await vi.advanceTimersByTimeAsync(6);
+    const { key } = await pending;
+    expect(env.INBOUND_EMAIL_QUEUE.send).toHaveBeenCalledWith({ version: 1, key });
+  });
+
+  it.each([0, -1, 1.5, 120_001, NaN, Infinity, "5"])("rejects invalid archive timeout %s before accepting mail", async archiveTimeoutMs => {
+    const { env, bucket } = setup();
+    await expect(retainEmail(message(), env, { archiveTimeoutMs })).rejects.toThrow("inbound archive timeout");
+    expect(bucket.put).not.toHaveBeenCalled();
+    expect(env.INBOUND_EMAIL_QUEUE.send).not.toHaveBeenCalled();
+  });
+
   it("recovers failed enqueue through scheduled scanning", async () => {
     const { env, objects } = setup();
     env.INBOUND_EMAIL_QUEUE.send.mockRejectedValue(new Error("unavailable"));

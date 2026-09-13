@@ -123,9 +123,10 @@ For a custom Worker, import `retainEmail(message, env, { metadata })`,
 Wire the latter two to your queue and scheduled handlers as in the default export.
 For a secondary raw archive, pass `archive: async ({ raw, from, to, key }) => ...`
 to `retainEmail`. It runs after the primary R2 commit with the original MIME bytes;
-`key` is the pending object identity. Its errors or fixed 10-second timeout are
+`key` is the pending object identity. Its errors or default 10-second timeout are
 logged as `archive_failed_retained` and do not prevent queue delivery. A timed-out
-callback is not canceled. Treat bytes as read-only and never parse the private
+callback is not canceled. Set `archiveTimeoutMs` to an integer from 1 to 120,000
+milliseconds to fit your host's runtime budget. Treat bytes as read-only and never parse the private
 pending frame to build an archive. The primary R2 write is always mandatory.
 Trusted provider metadata is captured once at receipt, never recomputed on replay.
 The existing `relayEmail` archive callback is best effort and does not enable this
