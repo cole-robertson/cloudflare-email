@@ -3,6 +3,12 @@ require "open3"
 require "rbconfig"
 
 class MailboxCoreTest < Minitest::Test
+  def test_core_loaded_before_rails_still_installs_retention_and_job_hooks
+    output, status = Open3.capture2e({ "MAILBOX_KIT_ONLY" => "1", "MAILBOX_KIT_BEFORE_RAILS" => "1" },
+      RbConfig.ruby, File.expand_path("support/management_engine.rb", __dir__))
+    assert status.success?, output
+  end
+
   def test_standalone_tenant_database_jobs
     output, status = Open3.capture2e(RbConfig.ruby, File.expand_path("support/mailbox_core_tenancy.rb", __dir__))
     assert status.success?, output

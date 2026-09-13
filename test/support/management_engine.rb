@@ -5,6 +5,7 @@ else
 end
 require "tmpdir"
 require "fileutils"
+require "mailbox_kit/mailboxes" if ENV["MAILBOX_KIT_BEFORE_RAILS"]
 require "rails"
 require "active_record/railtie"
 require "action_controller/railtie"
