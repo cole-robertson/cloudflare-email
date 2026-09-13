@@ -104,6 +104,25 @@ jobs:
       - run: npm run check
       - run: node ../../script/verify_durable_capacity.mjs
 
+  deploy-template:
+    name: Standalone Deploy to Cloudflare template
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - run: node script/sync_deploy_template.mjs --check
+      - name: Test isolated template as cloned by Cloudflare
+        run: |
+          template_dir=$(mktemp -d)
+          cp -R templates/deploy-to-cloudflare/. "$template_dir/"
+          cd "$template_dir"
+          npm ci
+          npm audit --audit-level=high
+          npm test
+          npm run check
+
   local-ingress:
     name: Local workerd → Rails ingress
     runs-on: ubuntu-latest

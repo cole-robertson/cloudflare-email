@@ -1,6 +1,6 @@
 # Check whether an address is configured to reach your Worker
 
-This diagnostic is unreleased and is not included in gem version 0.2.0.
+This diagnostic is available in gem version 0.3.0.
 
 A mailbox registered in Rails is not proof that Cloudflare can deliver to it.
 Use this read-only check when onboarding a receiving domain, investigating a

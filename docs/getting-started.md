@@ -18,11 +18,11 @@ not need to be the same domain as your Rails application's web address.
 
 ### Install the current code
 
-Add version 0.2 to your app's `Gemfile`. If upgrading from 0.1, read the
-[upgrade guide](upgrading-0.2.md) before changing an existing Worker deployment:
+Add version 0.3 to your app's `Gemfile`. If upgrading an existing installation, read the
+[upgrade guide](upgrading-0.3.md) before changing an existing Worker deployment:
 
 ```ruby
-gem "cloudflare-email", "~> 0.2.0"
+gem "cloudflare-email", "~> 0.3.0"
 ```
 
 ```sh
@@ -123,8 +123,13 @@ In Cloudflare **Email Routing → your apex domain → Settings → Subdomains**
 your receiving subdomain, such as `in.example.com`, and finish its DNS setup.
 This is separate from verifying the sending domain.
 
-Deploy Rails with ActionMailbox storage and workers configured. Then run these
-commands in an environment with production configuration and deployment credentials:
+Deploy Rails with ActionMailbox storage and workers configured. For guided
+Worker setup, use the [Deploy to Cloudflare template](../templates/deploy-to-cloudflare/README.md).
+It provisions R2 and Queues and prompts for your Rails URL and shared secret.
+Then select that Worker in your Email Routing rule as described in its guide.
+
+For the CLI setup instead, run these commands in an environment with production
+configuration and deployment credentials:
 
 First create the private R2 bucket and Queue, then deploy the generated Wrangler
 configuration using the [durable setup guide](../templates/worker/docs/durable-inbound.md).
@@ -300,4 +305,4 @@ override it. Cloudflare has separate [outgoing size and recipient limits](https:
 
 Use [troubleshooting](troubleshooting.md) when something does not arrive,
 [the feature overview](features.md) to explore more, and
-[the upgrade guide](upgrading-0.2.md) for an existing 0.1 installation.
+[the upgrade guide](upgrading-0.3.md) for an existing 0.1 installation.

@@ -1,0 +1,36 @@
+{
+  "name": "cloudflare-email-ingress",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "^22.12.0 || ^24.0.0 || >=26.0.0"
+  },
+  "description": "Cloudflare Email Worker that forwards inbound mail to a Rails ActionMailbox ingress (HMAC-signed).",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "check": "wrangler deploy --dry-run",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "vitest": "^5.0.0",
+    "wrangler": "^4.131.0"
+  },
+  "cloudflare": {
+    "bindings": {
+      "RAILS_INGRESS_URL": {
+        "description": "Your deployed Rails HTTPS ingress URL, normally `https://your-app.com/rails/action_mailbox/cloudflare/inbound_emails`. Deploy cloudflare-email 0.3+ in Rails first."
+      },
+      "INGRESS_SECRET": {
+        "description": "Paste the same random secret configured as `cloudflare.ingress_secret` in Rails credentials (or `CLOUDFLARE_INGRESS_SECRET`). Generate it with `openssl rand -hex 32`."
+      },
+      "INBOUND_EMAIL_STORE": {
+        "description": "Private storage for pending email while Rails is unavailable. Use a new bucket for this app; never expire pending objects."
+      },
+      "INBOUND_EMAIL_QUEUE": {
+        "description": "Delivery pointers for this app. The scheduled recovery pass also recovers retained mail after queue retries are exhausted."
+      }
+    }
+  }
+}

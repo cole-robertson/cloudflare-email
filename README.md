@@ -2,7 +2,11 @@
 
 Ruby client for [Cloudflare Email Service](https://developers.cloudflare.com/email-service/), with ActionMailer, authenticated ActionMailbox ingress, a forwarding Worker, and optional durable Rails sending and delivery-event tracking.
 
-Version **0.2.0**. Ruby 3.2+, Rails 7.2–8.1; Ruby 4.0 is tested with Rails 8.1. Supported test floors are Rails 7.2.3.2, 8.0.5.1, and 8.1.3.1. Prefer a maintained Ruby/Rails release for new applications. The plain Ruby client uses Ruby's standard libraries plus the Base64 gem. Node is optional: Worker deployment also works through the included Ruby deployer. See [security guidance](SECURITY.md) for deployment responsibilities.
+Version **0.3.0**. Ruby 3.2+, Rails 7.2–8.1; Ruby 4.0 is tested with Rails 8.1. Supported test floors are Rails 7.2.3.2, 8.0.5.1, and 8.1.3.1. Prefer a maintained Ruby/Rails release for new applications. The plain Ruby client uses Ruby's standard libraries plus the Base64 gem. Node is optional: Worker deployment also works through the included Ruby deployer. See [security guidance](SECURITY.md) for deployment responsibilities.
+
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/cole-robertson/cloudflare-email/tree/main/templates/deploy-to-cloudflare)
+
+Deploy the inbound Worker with guided R2/Queue provisioning and secret setup. [Prepare Rails and connect your email address](templates/deploy-to-cloudflare/README.md).
 
 ## Start here
 
@@ -16,25 +20,25 @@ Version **0.2.0**. Ruby 3.2+, Rails 7.2–8.1; Ruby 4.0 is tested with Rails 8.1
 | [Getting started](docs/getting-started.md) | Install, send your first email, receive replies, and save reliable send operations |
 | [Troubleshooting](docs/troubleshooting.md) | What to check when mail or delivery updates do not arrive |
 | [Managed mailboxes](docs/mailboxes.md) | Create inboxes and aliases, read/archive mail, and send from a mailbox |
-| [Management engine (unreleased)](docs/management-engine.md) | Mount an optional server-rendered mailbox UI using your app's authentication |
-| [Custom ingress (unreleased)](docs/custom-ingress.md) | Reuse authentication, signed metadata, and tenant routing in your existing ingestion pipeline |
-| [Routing diagnostics (unreleased)](docs/routing-diagnostics.md) | Inspect exact-domain DNS and Worker routes without changing infrastructure |
-| [Reusable Worker pipeline (unreleased)](templates/worker/README.md#reuse-the-transport-in-an-existing-worker) | Keep custom backend and archive policies while sharing bounded email forwarding |
-| [Durable inbound delivery (unreleased)](templates/worker/README.md#durable-inbound-delivery) | Store incoming mail in R2 and recover Rails outages with queued retries and scheduled recovery |
-| [Routing delivery confirmation (unreleased)](docs/routing-deliveries.md) | Confirm qualifying normal-address deliveries using authenticated Routing analytics |
+| [Management engine](docs/management-engine.md) | Mount an optional server-rendered mailbox UI using your app's authentication |
+| [Custom ingress](docs/custom-ingress.md) | Reuse authentication, signed metadata, and tenant routing in your existing ingestion pipeline |
+| [Routing diagnostics](docs/routing-diagnostics.md) | Inspect exact-domain DNS and Worker routes without changing infrastructure |
+| [Reusable Worker pipeline](templates/worker/README.md#reuse-the-transport-in-an-existing-worker) | Keep custom backend and archive policies while sharing bounded email forwarding |
+| [Durable inbound delivery](templates/worker/README.md#durable-inbound-delivery) | Store incoming mail in R2 and recover Rails outages with queued retries and scheduled recovery |
+| [Routing delivery confirmation](docs/routing-deliveries.md) | Confirm qualifying normal-address deliveries using authenticated Routing analytics |
 | [SQLite tenant databases](docs/activerecord-tenanted.md) | Give each organization its own SQLite database with `activerecord-tenanted` |
 | [Durable outbox](docs/outbox.md) | Detailed setup, callbacks, retries, and recovery |
 | [Delivery events](docs/delivery-events.md) | Cloudflare Queue setup and recipient status tracking |
-| [Upgrading to 0.2](docs/upgrading-0.2.md) | Changes needed for an existing installation |
+| [Upgrading to 0.3](docs/upgrading-0.3.md) | Changes needed for an existing installation |
 
 The sections below are the configuration and API reference.
 
 ## Install and send from Rails
 
-Add version 0.2 to your Gemfile. Existing 0.1 users should follow the [upgrade guide](docs/upgrading-0.2.md), including the coordinated Rails/Worker update:
+Add version 0.3 to your Gemfile. Existing users should follow the [upgrade guide](docs/upgrading-0.3.md), especially before deploying the durable Worker:
 
 ```ruby
-gem "cloudflare-email", "~> 0.2.0"
+gem "cloudflare-email", "~> 0.3.0"
 ```
 
 ```sh
@@ -239,7 +243,7 @@ end
 
 `Cloudflare::Email::Envelope.for(inbound_email)` returns a string-keyed `{"from" => "sender@example.com", "to" => "support@example.com"}` hash, or `nil` when the record has no authenticated envelope (for example, another ingress). The metadata is stored on the raw-email blob before routing jobs enqueue. It does not modify the MIME source. Envelope sender information records the SMTP reverse path; it does not authenticate the human sender. An empty `from` is valid for bounces.
 
-The bundled Worker uses v2 signatures by default; missing or v1 signatures are rejected. The unreleased custom-ingress API also supports opt-in v3 signatures carrying authenticated Worker metadata. See [custom ingestion](docs/custom-ingress.md) and upgrade the Rails receiver before enabling v3 in a custom Worker. When upgrading from v1, coordinate Rails and Worker deployment while ingress is paused. Both envelope versions require ASCII dot-atom addresses, at most 254 bytes with a 64-byte local part. Quoted local parts, address literals, and internationalized addresses are not supported by this envelope format.
+The bundled Worker uses v2 signatures by default; missing or v1 signatures are rejected. The custom-ingress API also supports opt-in v3 signatures carrying authenticated Worker metadata. See [custom ingestion](docs/custom-ingress.md) and upgrade the Rails receiver before enabling v3 in a custom Worker. When upgrading from v1, coordinate Rails and Worker deployment while ingress is paused. Both envelope versions require ASCII dot-atom addresses, at most 254 bytes with a 64-byte local part. Quoted local parts, address literals, and internationalized addresses are not supported by this envelope format.
 
 Successful ingress storage returns HTTP 200; duplicate storage returns 200 too. The timestamp window limits request age, but is not a one-time replay ledger. Version 2 deduplication includes the exact SMTP recipient, so identical MIME delivered to separate To/Cc/Bcc recipients creates separate inbound records while a retry for the same recipient creates none.
 

@@ -18,6 +18,7 @@ node_modules/
 templates/worker/node_modules/
 templates/worker/.wrangler/
 templates/worker/.dev.vars*
+templates/deploy-to-cloudflare/.wrangler/
 
 # Dogfood fixtures — not part of the gem
 /trial/
