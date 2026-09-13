@@ -228,7 +228,7 @@ become `?` in this display metadata only. Retention, unique keys, archive browsi
 and recovery authorization belong to the host. Rails email persistence starts
 after delivery and does not replace this optional outage archive.
 
-## Keep inbound mail while Rails is unavailable
+## Durable inbound delivery (opt-in)
 
 Enable the optional [durable inbound mode](./docs/durable-inbound.md) to commit
 each accepted message to R2 before the Email Worker returns. A Queue delivers

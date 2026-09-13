@@ -64,6 +64,13 @@ at least `ceil(pending_count / 5)` minutes per full pass. Overlapping cron runs
 may repeat a page; delivery remains idempotent. Scale and exercise this recovery
 rate against your expected backlog before depending on it.
 
+The template buffers MIME to sign it, and the durable path also builds a framed
+storage payload. Test messages near your configured size limit with realistic
+concurrent traffic against the Worker's memory limit before production rollout.
+Lower `MAX_EMAIL_BYTES` in both Worker and Rails if your workload requires it;
+lowering it below already retained message sizes leaves those messages pending
+until the limit is restored or they are recovered through an authorized process.
+
 ## Operate and verify
 
 Enable Worker logs and alerts for the structured
