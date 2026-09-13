@@ -35,12 +35,19 @@ module MailboxKit
 
       # Only call after authenticating ingress and its envelope. Resolve before
       # ActionMailbox or ActiveStorage accesses a tenant connection.
-      def receive(recipient:, &block)
-        raise ArgumentError, "persistence block required" unless block
+      def receive(recipient:, source: nil, &block)
+        raise ArgumentError, "provide source or a persistence block, not both" if source && block
+        raise ArgumentError, "source or persistence block required" unless source || block
         in_recipient_tenant(recipient) do |session, address, directory|
           session.receive(address, directory) do |destination|
-            # Preserve strict callbacks accepted before destinations were yielded.
-            block.lambda? && block.arity.zero? ? block.call : block.call(destination)
+            if block
+              # Legacy custom persistence blocks must return the existing Rails
+              # record on duplicates when membership attachment is desired.
+              block.lambda? && block.arity.zero? ? block.call : block.call(destination)
+            else
+              require "mailbox_kit/inbound_email"
+              InboundEmail.persist(source: source).record
+            end
           end
         end
       end
@@ -165,6 +172,20 @@ module MailboxKit
         ::ActionMailbox::InboundEmail.find(message.inbound_email_id)
       end
 
+      # For an existing Rails ingress or ApplicationMailbox handler. The caller
+      # has already selected this trusted tenant and authorized the inbound ID.
+      # Never accept an unscoped ID from a customer or switch tenants around a
+      # model object loaded from another database.
+      def attach(recipient:, inbound_email_id:)
+        context!
+        ensure_storage_connection!
+        address = Mailboxes.canonical_address(recipient)
+        directory = ReceivingDomain.find_by!(domain: address.split("@", 2).last,
+          tenant_key: tenant_key, state: "active")
+        destination = resolve_destination(address, directory)
+        attach_destination(destination, inbound_email_id)
+      end
+
       # Explicit permanent removal. Archive is the reversible default.
       # Other mailbox memberships retain their shared raw source.
       def purge_message(mailbox_id, message_id)
@@ -173,9 +194,14 @@ module MailboxKit
         Message.transaction do
           message = messages(mailbox_id).find(message_id)
           inbound_id = message.inbound_email_id
-          message.destroy!
-          unless Message.where(inbound_email_id: inbound_id).exists?
-            ::ActionMailbox::InboundEmail.find_by(id: inbound_id)&.destroy!
+          inbound = ::ActionMailbox::InboundEmail.find_by(id: inbound_id)
+          if inbound
+            inbound.with_lock do
+              message.destroy!
+              inbound.destroy! unless Message.where(inbound_email_id: inbound_id).exists?
+            end
+          else
+            message.destroy!
           end
         end
       end
@@ -194,8 +220,15 @@ module MailboxKit
         Mailbox.transaction do
           destination = resolve_destination(address, directory)
           inbound = yield destination
-          Message.create_or_find_by!(tenant_key: tenant_key, mailbox_id: destination.mailbox_id,
-            inbound_email_id: inbound.id) { |row| row.recipient = address } if inbound
+          if inbound
+            if defined?(::ActionMailbox::InboundEmail)
+              attach_destination(destination, inbound.id)
+            else
+              # Compatibility for host-owned storage. New integrations should
+              # use with_recipient for custom stores, or attach for Rails mail.
+              record_membership(destination, inbound.id)
+            end
+          end
           inbound
         end
       end
@@ -206,6 +239,21 @@ module MailboxKit
       end
 
       private
+
+      def attach_destination(destination, inbound_email_id)
+        inbound = ::ActionMailbox::InboundEmail.find(inbound_email_id)
+        inbound.with_lock do
+          if Message.where(inbound_email_id: inbound.id).where.not(tenant_key: tenant_key).exists?
+            raise ConfigurationError, "inbound email already belongs to another tenant"
+          end
+          record_membership(destination, inbound.id)
+        end
+      end
+
+      def record_membership(destination, inbound_email_id)
+        Message.create_or_find_by!(tenant_key: tenant_key, mailbox_id: destination.mailbox_id,
+          inbound_email_id: inbound_email_id) { |row| row.recipient = destination.recipient }
+      end
 
       def resolve_destination(address, directory)
         destination = Address.where(tenant_key: tenant_key, address: address,

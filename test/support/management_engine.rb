@@ -30,10 +30,11 @@ else
 end
 require "rack/test"
 require "nokogiri"
+require "minitest/mock"
 
 MANAGEMENT_ROOT = Dir.mktmpdir("cf-email-management")
 ENV["RAILS_ENV"] = "test"
-ENV["DATABASE_URL"] = "sqlite3:#{MANAGEMENT_ROOT}/test.sqlite3"
+ENV["DATABASE_URL"] = ENV.fetch("MAILBOX_KIT_POSTGRES_URL", "sqlite3:#{MANAGEMENT_ROOT}/test.sqlite3")
 Minitest.after_run do
   ActiveRecord::Base.connection_handler.clear_all_connections!
   FileUtils.remove_entry(MANAGEMENT_ROOT)
@@ -65,6 +66,7 @@ class ManagementFixtureLoginController < ActionController::Base
 end
 Rails.application.routes.draw do
   post "/fixture-login", to: "management_fixture_login#create"
+  post "/rails/action_mailbox/postmark/inbound_emails", to: "action_mailbox/ingresses/postmark/inbound_emails#create"
   mount FixtureEmail::Management::Engine => "/nested/email"
 end
 
@@ -128,6 +130,7 @@ class ManagementEngineIntegrationTest < Minitest::Test
 
   def setup
     clear_cookies
+    ActiveJob::Base.queue_adapter.enqueued_jobs.clear
     ManagementFixtureAdapter.denied_actions = []
     ManagementFixtureAdapter.permitted_domains = ["example.test"]
     ManagementFixtureAdapter.unscoped_mailboxes = false
@@ -161,10 +164,190 @@ class ManagementEngineIntegrationTest < Minitest::Test
   def test_raw_mail_is_retained_until_explicit_purge
     member, inbound = incoming(@owned)
     with_session do |session|
+      inbound.delivered!
+      inbound.update_columns(updated_at: 60.days.ago)
       inbound.incinerate
       assert ActionMailbox::InboundEmail.exists?(inbound.id)
+      transient = ActionMailbox::InboundEmail.create_and_extract_message_id!("Message-ID: <transient@example.test>\r\n\r\nTemporary")
+      transient.delivered!
+      transient.update_columns(updated_at: 60.days.ago)
+      transient.incinerate
+      refute ActionMailbox::InboundEmail.exists?(transient.id)
       session.purge_message(@owned.id, member.id)
       refute ActionMailbox::InboundEmail.exists?(inbound.id)
+    end
+  end
+
+  def activate_addresses
+    %w[workspace other].each do |key|
+      Email::Mailboxes.for_tenant(key) do |session|
+        session.mailboxes.each do |box|
+          box.addresses.each { |address| session.activate_address!(address.id, evidence: "local routing verification") }
+        end
+      end
+    end
+  end
+
+  def source_for_memberships
+    "From: sender@example.test\r\nTo: misleading@example.test\r\nMessage-ID: <membership@example.test>\r\nSubject: Shared source\r\n\r\nHello\r\n"
+  end
+
+  def test_source_receiving_shares_rails_record_across_inboxes_without_reprocessing
+    activate_addresses
+    first = Email::Mailboxes.receive(recipient: "owner@example.test", source: source_for_memberships)
+    with_session { |session| session.mark_read(@owned.id, session.messages(@owned.id).first.id) }
+    second = Email::Mailboxes.receive(recipient: "private@example.test", source: source_for_memberships)
+    replay = Email::Mailboxes.receive(recipient: "owner@example.test", source: source_for_memberships)
+    assert_equal first.id, second.id
+    assert_equal first.id, replay.id
+    assert_equal source_for_memberships, first.source
+    assert_equal 1, ActionMailbox::InboundEmail.count
+    assert_equal 2, Email::Mailboxes::Message.count
+    assert_equal 1, ActiveJob::Base.queue_adapter.enqueued_jobs.count { |job| job[:job] == ActionMailbox::RoutingJob }
+    with_session do |session|
+      assert session.messages(@owned.id).first.read_at
+      assert_nil session.messages(@private.id).first.read_at
+      session.purge_message(@owned.id, session.messages(@owned.id).first.id)
+      assert ActionMailbox::InboundEmail.exists?(first.id)
+      session.purge_message(@private.id, session.messages(@private.id).first.id)
+      refute ActionMailbox::InboundEmail.exists?(first.id)
+    end
+  end
+
+  def test_source_receiving_separates_tenants_even_when_they_share_a_database
+    activate_addresses
+    first = Email::Mailboxes.receive(recipient: "owner@example.test", source: source_for_memberships)
+    second = Email::Mailboxes.receive(recipient: "box@other.test", source: source_for_memberships)
+    refute_equal first.id, second.id
+    assert_equal 2, ActionMailbox::InboundEmail.count
+    assert_equal 2, ActiveJob::Base.queue_adapter.enqueued_jobs.count { |job| job[:job] == ActionMailbox::RoutingJob }
+    Email::Mailboxes.for_tenant("other") do |session|
+      assert_raises(Email::ConfigurationError) do
+        session.attach(recipient: "box@other.test", inbound_email_id: first.id)
+      end
+    end
+  end
+
+  def test_existing_rails_records_attach_idempotently_and_reserve_suspended_addresses
+    activate_addresses
+    inbound = ActionMailbox::InboundEmail.create_and_extract_message_id!(source_for_memberships)
+    with_session do |session|
+      entry = session.attach(recipient: "owner@example.test", inbound_email_id: inbound.id)
+      replay = session.attach(recipient: "owner@example.test", inbound_email_id: inbound.id)
+      assert_equal entry.id, replay.id
+      alias_address = session.add_address(@owned.id, address: "alias@example.test")
+      session.activate_address!(alias_address.id, evidence: "fixture")
+      assert_equal entry.id, session.attach(recipient: alias_address.address, inbound_email_id: inbound.id).id
+      session.suspend_address(@owned.id, alias_address.id)
+      assert_raises(Email::Mailboxes::Unavailable) do
+        session.attach(recipient: alias_address.address, inbound_email_id: inbound.id)
+      end
+      assert_raises(ActiveRecord::RecordNotFound) do
+        session.attach(recipient: "owner@example.test", inbound_email_id: -1)
+      end
+      assert_raises(ActiveRecord::RecordNotFound) do
+        session.attach(recipient: "box@other.test", inbound_email_id: inbound.id)
+      end
+    end
+    assert_equal 1, Email::Mailboxes::Message.count
+    assert_equal 1, ActiveJob::Base.queue_adapter.enqueued_jobs.count { |job| job[:job] == ActionMailbox::RoutingJob }
+  end
+
+  def test_rails_retention_setting_disables_scheduling_without_kit_membership
+    previous = ActionMailbox.incinerate
+    ActionMailbox.incinerate = false
+    inbound = ActionMailbox::InboundEmail.create_and_extract_message_id!(source_for_memberships)
+    inbound.delivered!
+    assert inbound.persisted?
+    assert_equal 0, Email::Mailboxes::Message.count
+    refute ActiveJob::Base.queue_adapter.enqueued_jobs.any? { |job| job[:job] == ActionMailbox::IncinerationJob }
+  ensure
+    ActionMailbox.incinerate = previous
+  end
+
+  def test_missing_message_id_replay_is_stable_across_hosts
+    activate_addresses
+    source = "From: sender@example.test\r\n\r\nNo Message-ID"
+    first = Socket.stub(:gethostname, "host-one") { Email::Mailboxes.receive(recipient: "owner@example.test", source: source) }
+    second = Socket.stub(:gethostname, "host-two") { Email::Mailboxes.receive(recipient: "private@example.test", source: source) }
+    assert_equal first.id, second.id
+    assert_equal source, second.source
+    assert_equal 2, Email::Mailboxes::Message.count
+  end
+
+  def test_failed_membership_rolls_back_rails_records_and_routing_enqueue
+    activate_addresses
+    failure = ->(*, **) { raise "membership write failed" }
+    Email::Mailboxes::Message.stub(:create_or_find_by!, failure) do
+      assert_raises(RuntimeError) do
+        Email::Mailboxes.receive(recipient: "owner@example.test", source: source_for_memberships)
+      end
+    end
+    assert_equal 0, ActionMailbox::InboundEmail.count
+    assert_equal 0, ActiveStorage::Blob.count
+    refute ActiveJob::Base.queue_adapter.enqueued_jobs.any? { |job| job[:job] == ActionMailbox::RoutingJob }
+    assert_nil Email::Tenancy.current_key
+  end
+
+  def test_stock_postmark_ingress_can_feed_existing_record_attachment
+    previous_ingress = ActionMailbox.ingress
+    previous_password = ENV["RAILS_INBOUND_EMAIL_PASSWORD"]
+    ActionMailbox.ingress = :postmark
+    ENV["RAILS_INBOUND_EMAIL_PASSWORD"] = "local-postmark-password"
+    activate_addresses
+    headers = { "CONTENT_TYPE" => "application/json",
+      "HTTP_AUTHORIZATION" => "Basic #{Base64.strict_encode64('actionmailbox:local-postmark-password')}" }
+    payload = { RawEmail: source_for_memberships, OriginalRecipient: "owner@example.test" }.to_json
+    2.times do
+      post "/rails/action_mailbox/postmark/inbound_emails", payload, headers
+      assert_equal 204, last_response.status
+    end
+    inbound = ActionMailbox::InboundEmail.sole
+    # A fixed, host-authorized route in a single database: no inference of
+    # tenant entitlement from MIME To or X-Original-To headers.
+    with_session do |session|
+      session.attach(recipient: "owner@example.test", inbound_email_id: inbound.id)
+    end
+    assert_equal inbound.id, Email::Mailboxes::Message.sole.inbound_email_id
+    assert_equal 1, ActiveJob::Base.queue_adapter.enqueued_jobs.count { |job| job[:job] == ActionMailbox::RoutingJob }
+  ensure
+    ActionMailbox.ingress = previous_ingress
+    ENV["RAILS_INBOUND_EMAIL_PASSWORD"] = previous_password
+  end
+
+  if ENV["MAILBOX_KIT_POSTGRES_URL"]
+    def test_concurrent_postgres_source_delivery_recovers_the_unique_conflict
+      require "timeout"
+      activate_addresses
+      model = ActionMailbox::InboundEmail
+      original = model.method(:create_and_extract_message_id!)
+      entered, release = Queue.new, Queue.new
+      barrier = ->(*args, **options) do
+        entered << true
+        Timeout.timeout(10) { release.pop }
+        original.call(*args, **options)
+      end
+      workers = []
+      model.stub(:create_and_extract_message_id!, barrier) do
+        2.times do
+          workers << Thread.new do
+            ActiveRecord::Base.connection_pool.with_connection do
+              Email::Mailboxes.receive(recipient: "owner@example.test", source: source_for_memberships).id
+            end
+          end
+        end
+        2.times { Timeout.timeout(10) { entered.pop } }
+        2.times { release << true }
+        ids = workers.map { |worker| Timeout.timeout(10) { worker.value } }
+        assert_equal 1, ids.uniq.length
+      end
+      assert_equal 1, ActionMailbox::InboundEmail.count
+      assert_equal 1, Email::Mailboxes::Message.count
+      assert_equal 1, ActiveStorage::Blob.count
+      assert_equal 1, ActiveJob::Base.queue_adapter.enqueued_jobs.count { |job| job[:job] == ActionMailbox::RoutingJob }
+    ensure
+      2.times { release << true } if release
+      workers&.each { |worker| worker.join(12) || worker.kill }
     end
   end
 

@@ -35,9 +35,8 @@ module Cloudflare
             head :payload_too_large
           when :ok
             inbound = if defined?(Cloudflare::Email::Mailboxes) && Cloudflare::Email::Mailboxes.enabled?
-              recipient = result.message.envelope.fetch("to")
               begin
-                Cloudflare::Email::Mailboxes.receive(recipient: recipient) { result.message.persist_action_mailbox! }
+                result.message.receive_into_mailbox!
               rescue Cloudflare::Email::Mailboxes::Unavailable
                 payload[:result] = :unavailable_mailbox
                 next head(:unprocessable_entity)

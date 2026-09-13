@@ -35,18 +35,29 @@ module Cloudflare
         # framework records and memberships share the resolved tenant context.
         # Custom endpoints may instead persist body/metadata in their own store.
         def persist_action_mailbox!
-          ::ActionMailbox::InboundEmail.transaction do
-            inbound = ::ActionMailbox::InboundEmail.create_and_extract_message_id!(body,
-              message_checksum: message_checksum, message_id: stable_message_id)
-            if inbound
-              blob = inbound.raw_email.blob
-              blob.update!(metadata: blob.metadata.merge(storage_metadata))
-            end
-            inbound
+          result = persist_rails_record
+          result.record if result.created?
+        end
+
+        # Verify once, resolve the envelope recipient before storage, then use
+        # the kit's ordinary Rails membership path. A duplicate can repair a
+        # missing membership without scheduling Rails processing again.
+        def receive_into_mailbox!
+          result = nil
+          Mailboxes.receive(recipient: envelope.fetch("to")) do
+            result = persist_rails_record
+            result.record
           end
+          result.record if result.created?
         end
 
         private
+
+        def persist_rails_record
+          require "mailbox_kit/inbound_email"
+          MailboxKit::InboundEmail.persist(source: body, message_checksum: message_checksum,
+            message_id: stable_message_id, metadata: storage_metadata)
+        end
 
         # ActionMailbox's fallback includes Socket.gethostname. A replay on a
         # different Rails host must use the same database identity, while the

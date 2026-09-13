@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Lean on Action Mailbox for original email records, processing and configurable
+  retention. Add idempotent attachment of existing Rails records and source-based
+  receiving that resolves duplicates for inbox membership. Share the persistence
+  bridge with Cloudflare while preserving its signed delivery identity and legacy
+  duplicate return value. Reuse Rails' model load hook for selective retention.
+
 - Extract provider-neutral mailbox storage, recipient routing, optional tenancy,
   raw-message retention, Rails job context and the server-rendered UI into the
   sibling `mailbox-kit` gem. Cloudflare APIs, Worker transport, sending outbox and

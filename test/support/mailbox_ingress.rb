@@ -166,6 +166,21 @@ class MailboxIngressIntegrationTest < Minitest::Test
     Email::Mailboxes.for_tenant("beta") { assert_equal 0, Email::Mailboxes::Message.count }
   end
 
+  def test_cloudflare_replay_repairs_membership_without_requeueing_rails_processing
+    post_mail("support@alpha.example.com")
+    assert_equal 200, last_response.status
+    Email::Mailboxes.for_tenant("alpha") { Email::Mailboxes::Message.delete_all }
+    ActiveJob::Base.queue_adapter.enqueued_jobs.clear
+    post_mail("support@alpha.example.com")
+    assert_equal 200, last_response.status
+    Email::Mailboxes.for_tenant("alpha") do
+      assert_equal 1, ActionMailbox::InboundEmail.count
+      assert_equal 1, Email::Mailboxes::Message.count
+      assert_equal "support@alpha.example.com", Email::Envelope.for(ActionMailbox::InboundEmail.last).fetch("to")
+    end
+    refute ActiveJob::Base.queue_adapter.enqueued_jobs.any? { |job| job[:job] == ActionMailbox::RoutingJob }
+  end
+
   def test_unknown_suspended_and_unsigned_destinations_store_nothing
     post_mail("support@unknown.example.com")
     assert_equal 422, last_response.status

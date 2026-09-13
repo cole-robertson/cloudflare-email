@@ -1,8 +1,10 @@
 # Mailbox Kit
 
-Persistent inboxes for Rails, independent of your email provider. Create mailboxes
-and aliases, route incoming recipients, retain messages, and mount a small server
-rendered management interface. SQLite works; separate tenant databases are opt-in.
+Owned inboxes on top of Action Mailbox, independent of your email provider. Rails
+already stores and parses email, routes it to processing handlers, and provides
+configurable retention. Mailbox Kit adds inbox identities, addresses/aliases,
+membership, read/archive state, scoped access and a server-rendered management UI.
+SQLite works; separate tenant databases are opt-in.
 
 This package is maintained alongside `cloudflare-email` so changes to the core and
 its first integration can be tested together. It is not yet published. In this
@@ -13,15 +15,18 @@ can use `gem "mailbox-kit", "~> 0.1"`.
 
 | Layer | Responsibility |
 | --- | --- |
-| Mailbox Kit | Mailboxes, addresses, recipient lookup, message membership, read/archive/purge, retention, tenant context, management UI |
-| Rails | ActionMailbox raw MIME and ActiveStorage attachments; jobs; ActionMailer |
+| Mailbox Kit | Owned inbox identities, addresses, recipient lookup, membership, read/archive/purge, selective retention, tenant context, management UI |
+| Rails | InboundEmail records, original MIME/ActiveStorage, parsing, processing callbacks/status, routing jobs, configurable retention, and ActionMailer |
 | Provider integration | Verify incoming requests and envelope recipients, deliver outgoing messages, authenticate delivery feedback, configure DNS/routes |
 | Your application | Users, organizations, sites, permissions, sender acceptance and business workflows |
 
 Mailbox Kit does not require Cloudflare, configure DNS, or send messages by itself.
 `cloudflare-email` supplies its existing Worker ingress, sending/outbox, feedback,
 and provisioning integration. Other providers can call the core receiving APIs;
-this release does not claim a tested SES, Postmark, or generic outbound adapter.
+this release does not claim complete SES, Postmark, or generic outbound adapters.
+The tests exercise Rails' stock Postmark HTTP ingress followed by explicit kit
+attachment in one database; provider setup, dynamic envelope authorization and
+provider outage behavior are separate integration responsibilities.
 Inbound and outbound need not use the same service. A mailbox has no `provider`
 attribute: receiving through one provider does not authorize sending through it.
 
@@ -64,24 +69,98 @@ Automatic `has_mailbox` owner bindings and deletion reconciliation are a separat
 follow-up; this extraction does not introduce a callback that could silently
 reassign an old address to a new owner.
 
-## Receive and retain messages
+## Reuse Action Mailbox
+
+For a receive-and-process application, Action Mailbox alone may be enough. It
+already supports dynamic handlers through regex/callable routes, processing
+callbacks, test helpers, and the development conductor at
+`/rails/conductor/action_mailbox/inbound_emails`. The kit does not replace those.
+Rails' `delivered` status means an inbound handler finished processing; read and
+archive state belong to the kit's inbox membership instead.
+
+If an existing Rails ingress has already stored an email, attach that record:
+
+```ruby
+MailboxKit::Mailboxes.for_tenant(trusted_tenant_key) do |session|
+  membership = session.attach(
+    recipient: verified_envelope_recipient,
+    inbound_email_id: inbound_email.id
+  )
+end
+```
+
+The caller must authorize the inbound ID and select its tenant before loading
+records. Do not pass an ID from another tenant or accept an unscoped ID from a
+customer. Attachment checks active address ownership, looks up the Rails record
+in the current connection, and rejects existing membership in another tenant.
+It is idempotent for the inbox/email pair and does not enqueue processing again.
+Aliases into the same inbox share a membership, retaining the first recipient.
+
+Use Rails' normal `ApplicationMailbox` routing and processing callbacks. One
+handler can dynamically resolve many organizations/sites; no class per inbox is
+needed. Default Rails routes match message headers and choose the first handler;
+they do not establish trusted tenant entitlement or automatically fan out into
+every recipient's inbox. Select a tenant before initial storage if raw mail lives
+in separate tenant databases. Attaching later cannot relocate that original row.
+
+## Receive source through a verified integration
 
 Your ingress adapter must authenticate the request and extract the actual SMTP
 envelope recipient before invoking the core. Do not route on an untrusted MIME
 `To` header or a customer-supplied tenant key.
 
 ```ruby
-MailboxKit::Mailboxes.receive(recipient: verified_envelope_recipient) do |destination|
-  # Perform application acceptance checks here, inside the resolved tenant.
-  ActionMailbox::InboundEmail.create_and_extract_message_id!(raw_mime)
-end
+inbound_email = MailboxKit::Mailboxes.receive(
+  recipient: verified_envelope_recipient,
+  source: raw_mime
+)
 ```
 
 The core resolves an active domain and address, selects the tenant, and records
-the mailbox membership in the same transaction as your persistence block. Your
-transport adapter remains responsible for authenticating and deduplicating its
-deliveries and retrying failed requests. ActionMailbox routing still needs an
-`ApplicationMailbox` route and an application handler.
+the mailbox membership in the same database transaction as Rails persistence.
+It calls Rails' creation API and returns the existing record on duplicate source.
+Identical source within one tenant can belong to multiple inboxes without creating
+another raw email or routing job. Default source identity includes the tenant
+scope and uses a stable fallback for missing Message-ID; identical bytes in a
+different tenant do not suppress that tenant's processing. MIME is not rewritten.
+The adapter remains responsible for authentication, authoritative envelope
+recipients, delivery-specific identity where necessary, and retrying failed
+requests. ActionMailbox still owns processing and its `ApplicationMailbox` routes.
+
+For application checks before persistence, the existing block form remains:
+
+```ruby
+require "mailbox_kit/inbound_email"
+MailboxKit::Mailboxes.receive(recipient: verified_envelope_recipient) do |destination|
+  MyAcceptancePolicy.check!(destination) # Application policy; raise to reject.
+  MailboxKit::InboundEmail.persist(source: raw_mime).record
+end
+```
+
+Blocks must return the existing Rails record on duplicates if membership should
+be attached. Rails' bare `create_and_extract_message_id!` returns `nil` for a
+duplicate, so using it directly in that block can omit a second inbox membership.
+Returning `nil` intentionally skips membership, preserving the older block API.
+Neither a database transaction nor source deduplication guarantees exactly-once
+business effects, external blob cleanup on rollback, or recovery of lost jobs.
+
+With Cloudflare, the adapter preserves its existing authenticated envelope and
+metadata-based delivery identity, then uses the same Rails persistence bridge:
+
+```ruby
+verified = Cloudflare::Email::Ingress.verify(
+  secret: ingress_secret, headers: request.headers, body: request.body
+)
+# Handle non-:ok verification results before accessing the verified message.
+verified.message.receive_into_mailbox! if verified.status == :ok
+```
+
+The shipped Cloudflare ingress controller already does this, including HTTP error
+handling and size limits. Installing the core does not add another HTTP endpoint
+or SMTP server. `persist_action_mailbox!` remains available for applications that
+only need Rails storage; its existing return convention is new record or `nil`
+on duplicate. The new inbox bridge can repair membership on duplicate delivery
+without rerouting the email or replacing stored authentication metadata.
 
 For an application with its own persistence, use
 `with_recipient(recipient:) { |destination| ... }`; it performs lookup and tenant
@@ -100,10 +179,27 @@ MailboxKit::Mailboxes.for_tenant("workspace") do |session|
 end
 ```
 
-Mailbox membership retains the ActionMailbox raw source beyond its normal
-incineration window. `purge_message` explicitly removes membership and deletes raw
-mail only when no mailbox memberships remain. ActionMailbox, ActiveStorage and
-mailbox records must share a connection for atomic persistence and purge.
+## Retention is a Rails policy
+
+To retain all inbound mail, Rails already provides:
+
+```ruby
+config.action_mailbox.incinerate = false
+```
+
+Or configure its automatic cleanup interval with
+`config.action_mailbox.incinerate_after = 90.days`. Disabling scheduling does not
+cancel incineration jobs already queued. Rails normally schedules processed mail
+for cleanup after 30 days; pending mail is not processed mail.
+
+For apps that mix inboxes and transient email handlers, the kit adds a narrow
+membership guard through Rails' `action_mailbox_inbound_email` load hook: mail
+associated with an inbox survives normal incineration, while unassociated mail
+uses Rails' policy. `purge_message` explicitly removes membership and deletes raw
+mail only when no mailbox memberships remain. Attach, purge and this guard lock
+the same inbound row. Direct application deletion and external storage expiration
+remain the application's responsibility. ActionMailbox, ActiveStorage and mailbox
+records must share a connection for the transactional membership operations.
 
 ## Management interface
 
