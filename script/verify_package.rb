@@ -107,9 +107,13 @@ Dir.mktmpdir("cloudflare-email-package-") do |temporary|
   # The installed archive's file list excludes its development gemspec.
   core_specification = Gem::Package.new(core_archive).spec
   File.write(File.join(core_extracted, "mailbox-kit.gemspec"), core_specification.to_ruby)
+  # CI installs Rails in vendor/bundle rather than the system gem directory.
+  # Reuse those installed dependencies without inheriting the parent Gemfile.
+  dependency_gem_home = Gem.loaded_specs.fetch("rails").base_dir
   Bundler.with_unbundled_env do
     environment = {
       "RUBYOPT" => nil, "BUNDLE_GEMFILE" => File.join(core_consumer, "Gemfile"),
+      "GEM_HOME" => dependency_gem_home, "GEM_PATH" => dependency_gem_home,
       "BUNDLE_PATH" => nil, "BUNDLE_FROZEN" => "false", "BUNDLE_DEPLOYMENT" => "false",
       "MAILBOX_KIT_ONLY" => "1", "MAILBOX_KIT_EXPECTED_ROOT" => core_extracted,
       "MAILBOX_KIT_ISOLATED" => "1",
