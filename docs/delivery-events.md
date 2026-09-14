@@ -118,11 +118,8 @@ existing state, and a nonterminal event cannot replace terminal state. A later
 terminal complaint can replace delivery. Invalid timestamps raise. Match records
 and lock recipient state before using this ordering helper.
 
-Receipt retention, recurring jobs, and monitoring are application decisions. See
-the [gem/inbox boundary](architecture.md) for outbound-ledger scope. Existing
-receipt tables from the earlier preproduction adapter must normalize stored
-`message_id` values with `MessageId.normalize` before using filtered replay;
-raw payloads remain unchanged. The reference inbox's outbox migration does this.
+Schedule polling and replay in your application, and choose a retention period
+for delivery receipts.
 
 Poll a single batch:
 

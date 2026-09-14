@@ -1,9 +1,5 @@
 # Security
 
-The hardening described here is included in 0.2.0. Version 0.1.0 does not include
-these fixes. Upgrade Rails and the bundled Worker together using the
-[upgrade guide](docs/upgrading-0.2.md).
-
 Rails integration is tested on patched Rails 7.2, 8.0, and 8.1; application
 owners must update their own Rails, database adapter, and other dependencies.
 The gem does not add Rails or SQLite as runtime dependencies.
@@ -40,12 +36,8 @@ Do not place secrets or private message data in public issues.
   Ingress selects a registered tenant only after full signature verification.
   Raw ActiveRecord access remains privileged, especially in shared-database mode.
   Private tenant storage, consistent migrations and trusted job payloads are
-  required. Drain old framework jobs before enabling database tenancy; jobs
-  without the new tenant metadata are rejected rather than guessing a tenant.
+  required. Jobs without the required tenant context are rejected.
 - Development tunnels expose the ingress to the internet. Use the bundled task,
   dedicated development mail routes and test data; stop tunnels when finished.
   The Host guard restricts routing but is not a sandbox for the development app
   or a replacement for safe error pages and request logging.
-
-See [the September 11 security review](docs/verification/2026-09-11-security.md)
-for findings, verification, and remaining limits.

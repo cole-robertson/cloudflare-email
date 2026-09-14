@@ -3,15 +3,10 @@
 The optional mailbox module lets your app create mailboxes and aliases, receive
 mail into them, track read/archive state, and send through the durable outbox.
 It works in one SQLite database or with a separate database per organization.
-It supplies models and services; your app supplies permissions and the UI.
+Use the [management UI](management-engine.md) or build your own interface with these APIs.
 
-This module is available since version 0.2.0. Install `gem "cloudflare-email", "~> 0.4.0"` for the latest features, including the provider-neutral Mailbox Kit core.
-
-**Database multi-tenancy is off by default.** The mailbox generator works with
-one ordinary database. Calling `for_tenant` groups and scopes mailbox records;
-it does not create databases or install a tenant adapter. Separate databases
-require explicit `Tenancy.configure(...)` before models load. Neither Rails nor
-`activerecord-tenanted` is added to plain Ruby applications by this module.
+**Database multi-tenancy is off by default.** `for_tenant` scopes records in your
+existing database. [Separate databases](activerecord-tenanted.md) require explicit setup.
 
 ## Install
 
@@ -22,20 +17,19 @@ bin/rails generate cloudflare:email:mailboxes
 bin/rails db:migrate
 ```
 
-The generator includes the outbox and tracking generators. Do not generate those
-migrations a second time if you already installed them; inspect existing
-generator conflicts and retain your installed migrations. Restart Rails after
-configuration changes. The generated initializer explicitly loads:
+The generator includes the outbox and tracking setup. Keep any migrations you
+have already installed. Restart Rails after configuration changes.
+The generated initializer loads:
 
 ```ruby
 require "cloudflare/email/mailboxes"
 ```
 
 Loading this module enables mailbox lookup on the gem's Cloudflare ingress.
-Existing receiving addresses must be registered and activated before switching
-an existing application over. Unregistered or suspended destinations return
-HTTP 422 and the Worker rejects the delivery by default. You can explicitly
-configure a domain catch-all below when your application needs that behavior.
+Register and activate each accepted address. Unregistered or suspended destinations
+return HTTP 422. In the default durable Worker mode, the email stays pending at
+Cloudflare until you resolve the destination. Enable a domain catch-all below if
+you want unknown local parts to enter an inbox.
 
 For separate organization databases, follow the
 [activerecord-tenanted setup](activerecord-tenanted.md) **before loading the
@@ -47,10 +41,7 @@ use the same tenant connection as the mailbox tables for atomic incoming storage
 
 For addresses such as `invoices@acme.in.example.com`, follow the
 [Cloudflare domain setup guide](../templates/worker/docs/domain-setup.md).
-It covers Rebulk's existing wildcard receiving pattern, one-time infrastructure
-verification, and exact organization-domain registration in Rails. The gem does
-not require a per-organization Worker allowlist or Cloudflare approval once that
-receiving infrastructure is established; new accounts must verify the provider behavior.
+It covers receiving DNS, Worker routing, and registering customer domains in Rails.
 
 Run directory management from your authorized administration/provisioning code.
 Do not expose arbitrary domain claims to customers without ownership checks.
@@ -151,30 +142,14 @@ suspension is an administrative update of `ReceivingDomain#state` to `suspended`
 
 Addresses use lowercase ASCII dot-atom local parts and domains. Alias addresses
 are explicit: the module does not automatically strip `+tags` or invent address
-fallbacks. Reserve application-specific names such as Rebulk's `tracking` in
+fallbacks. Reserve application-specific names such as `tracking` in
 your mailbox-management policy before creation.
 
 ## Receive unregistered local parts with an optional catch-all
 
-Catch-all receiving is **off by default** and is available in the 0.3
-version. It lets one existing address receive otherwise unregistered addresses
-on its exact domain, without creating an alias row for each incoming local part.
-For example, `anything@acme.example.com` can arrive in an existing support mailbox.
-It does not cover subdomains such as `anything@other.acme.example.com`.
-
-Fresh installations include the schema. For an existing installation, generate
-the optional upgrade and apply it to the database containing your mailbox tables:
-
-```sh
-bin/rails generate cloudflare:email:mailboxes:catch_all
-bin/rails db:migrate
-```
-
-With separate tenant databases, pass
-`--tenant-migrations-path=db/tenant_migrate` and run your application's tenant
-migration command for every affected tenant. Updating the gem alone keeps older
-schemas working with exact-address routing. Enabling a catch-all without its
-migration raises a configuration error.
+Catch-all receiving is **off by default**. It lets one inbox receive unregistered
+local parts on its exact domain. For example, `anything@acme.example.com` can
+arrive in your support inbox. It does not cover `anything@other.acme.example.com`.
 
 First configure and verify the domain's catch-all Email Routing rule in Cloudflare
 to send mail to your Worker. Then use your authorized provisioning code:
@@ -348,23 +323,12 @@ the same tenant connection when atomicity is required. External effects cannot
 be rolled back. Provider acceptance, shared storage and tenant storage are not
 one transaction; this is not exactly-once delivery.
 
-## Isolation and rollout
+## Permissions
 
-The scoped session API checks tenant/mailbox ownership and sender addresses.
-It does not authenticate Rails users. Protect admin directory APIs, choose the
-tenant through your access resolver, and authorize every mailbox operation.
-Direct/unscoped ActiveRecord access is an application-level privileged interface,
-particularly in shared-database mode; it is not a row-level authorization system.
+Choose the tenant from your authenticated application context and authorize each
+mailbox operation. The scoped APIs check mailbox ownership within that tenant;
+direct Active Record access requires your own permission checks.
 
-For database tenancy, configure all framework storage on the tenant connection
-and exclude ingress from hostname/session tenant selection. New framework jobs
-capture tenant context before serialization and restore it before GlobalID
-lookup. Drain existing ActionMailbox/ActiveStorage queues before enabling this
-mode: previously serialized jobs without the new metadata are rejected.
-
-The gem does not create organizations/users, verify customer domain ownership,
-provide IMAP/POP, or supply a full compose/conversation inbox. The optional
-[management engine](management-engine.md) supplies mailbox administration and
-plain-text previews using your host's access policy. The original Rebulk document-processing
-Worker contract and sender-review policy still need a separate application
-migration; installing this module does not replace that live pipeline.
+For separate databases, use the [tenant connection guide](activerecord-tenanted.md)
+to configure framework storage and jobs. Your app supplies users, sender policy,
+and business processing.

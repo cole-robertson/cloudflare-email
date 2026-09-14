@@ -3,7 +3,7 @@
 ## 0.4.0 — 2026-09-14
 
 Released alongside Mailbox Kit 0.1.0. Cloudflare installs the core automatically.
-Existing installations should follow the [core upgrade guide](mailbox-kit/docs/upgrading.md).
+Existing installations should follow the [core upgrade guide](maintainer/upgrading-mailbox-kit.md).
 
 - Allow receiving domains without a sending account. The upgrade generator
   preserves existing directory records while making account ownership optional.
@@ -35,7 +35,7 @@ Existing installations should follow the [core upgrade guide](mailbox-kit/docs/u
 
 ## 0.3.0 — 2026-09-13
 
-See [upgrading from 0.2](docs/upgrading-0.3.md) before deploying the updated Worker.
+See [upgrading from 0.2](maintainer/upgrading-0.3.md) before deploying the updated Worker.
 
 - Add a standalone Deploy to Cloudflare template with R2/Queue provisioning,
   secret prompts, scheduled recovery, and logs. CI checks runtime/configuration

@@ -6,29 +6,9 @@ configurable retention. Mailbox Kit adds inbox identities, addresses/aliases,
 membership, read/archive state, scoped access and a server-rendered management UI.
 SQLite works; separate tenant databases are opt-in.
 
-This package is maintained alongside `cloudflare-email` so changes to the core and
-its first integration can be tested together. It is not yet published. In this
-checkout use `gem "mailbox-kit", path: "mailbox-kit"`. Once released, applications
-can use `gem "mailbox-kit", "~> 0.1"`.
-
-## What belongs where?
-
-| Layer | Responsibility |
-| --- | --- |
-| Mailbox Kit | Inbox identities, addresses, recipient lookup, membership, read/archive/purge, selective retention, tenant context, management UI |
-| Rails | InboundEmail records, original MIME/ActiveStorage, parsing, processing callbacks/status, routing jobs, configurable retention, and ActionMailer |
-| Provider integration | Verify incoming requests and envelope recipients, deliver outgoing messages, authenticate delivery feedback, configure DNS/routes |
-| Your application | Users, organizations, sites, permissions, sender acceptance and business workflows |
-
-Mailbox Kit does not require Cloudflare, configure DNS, or send messages by itself.
-`cloudflare-email` supplies its existing Worker ingress, sending/outbox, feedback,
-and provisioning integration. Other providers can call the core receiving APIs;
-this release does not claim complete SES, Postmark, or generic outbound adapters.
-The tests exercise Rails' stock Postmark HTTP ingress followed by explicit kit
-attachment in one database; provider setup, dynamic envelope authorization and
-provider outage behavior are separate integration responsibilities.
-Inbound and outbound need not use the same service. A mailbox has no `provider`
-attribute: receiving through one provider does not authorize sending through it.
+Install `gem "mailbox-kit", "~> 0.1.0"`, or use the
+[Cloudflare mailbox setup](https://github.com/cole-robertson/cloudflare-email/blob/main/docs/mailboxes.md)
+when Cloudflare is your provider.
 
 ## Create an inbox
 
@@ -63,20 +43,13 @@ end
 tenancy. Domain/address activation records evidence supplied by your trusted
 application. It does not verify DNS or grant permission to send from that address.
 
-`owner_ref` is currently an application-managed reference, not a foreign key or an
-authorization grant. Use stable identities, rather than reusable numeric IDs.
-Automatic `has_mailbox` owner bindings and deletion reconciliation are a separate
-follow-up; this extraction does not introduce a callback that could silently
-reassign an old address to a new owner.
+`owner_ref` stores your application's reference to a user, team, or organization.
+Use a stable identity and check access in your application.
 
-## Reuse Action Mailbox
+## Attach an Action Mailbox record
 
-For a receive-and-process application, Action Mailbox alone may be enough. It
-already supports dynamic handlers through regex/callable routes, processing
-callbacks, test helpers, and the development conductor at
-`/rails/conductor/action_mailbox/inbound_emails`. The kit does not replace those.
-Rails' `delivered` status means an inbound handler finished processing; read and
-archive state belong to the kit's inbox membership instead.
+Use ordinary `ApplicationMailbox` handlers for processing. Rails' `delivered`
+status means processing finished; read and archive state belong to the inbox.
 
 If an existing Rails ingress has already stored an email, attach that record:
 
@@ -127,7 +100,7 @@ The adapter remains responsible for authentication, authoritative envelope
 recipients, delivery-specific identity where necessary, and retrying failed
 requests. ActionMailbox still owns processing and its `ApplicationMailbox` routes.
 
-For application checks before persistence, the existing block form remains:
+To check application policy before saving, use a block:
 
 ```ruby
 require "mailbox_kit/inbound_email"
@@ -140,12 +113,11 @@ end
 Blocks must return the existing Rails record on duplicates if membership should
 be attached. Rails' bare `create_and_extract_message_id!` returns `nil` for a
 duplicate, so using it directly in that block can omit a second inbox membership.
-Returning `nil` intentionally skips membership, preserving the older block API.
+Returning `nil` skips membership.
 Neither a database transaction nor source deduplication guarantees exactly-once
 business effects, external blob cleanup on rollback, or recovery of lost jobs.
 
-With Cloudflare, the adapter preserves its existing authenticated envelope and
-metadata-based delivery identity, then uses the same Rails persistence bridge:
+A custom Cloudflare endpoint can verify and receive in two steps:
 
 ```ruby
 verified = Cloudflare::Email::Ingress.verify(
@@ -158,8 +130,8 @@ verified.message.receive_into_mailbox! if verified.status == :ok
 The shipped Cloudflare ingress controller already does this, including HTTP error
 handling and size limits. Installing the core does not add another HTTP endpoint
 or SMTP server. `persist_action_mailbox!` remains available for applications that
-only need Rails storage; its existing return convention is new record or `nil`
-on duplicate. The new inbox bridge can repair membership on duplicate delivery
+only need Rails storage; it returns the new record or `nil`
+on duplicate. The inbox bridge can repair membership on duplicate delivery
 without rerouting the email or replacing stored authentication metadata.
 
 For an application with its own persistence, use
@@ -254,30 +226,9 @@ Never choose the tenant from request parameters. Rails framework jobs preserve t
 explicit context; your own tenant jobs can `prepend MailboxKit::TenantJobContext`
 after requiring `mailbox_kit/tenant_job_context`.
 
-## Existing Cloudflare Email applications
-
-Keep your existing requires, initializer, migrations, Worker and mounted engine.
-Updating the Cloudflare gem brings in this core as a dependency. Public Cloudflare
-constants resolve to the same core models; tables, IDs and tenant job payload keys
-are retained. The `cloudflare_email_` table prefix is intentionally unchanged.
-Do **not** run `mailbox_kit:install` over an existing Cloudflare mailbox schema.
-
-For a fresh Cloudflare application, continue using the Cloudflare mailbox generator,
-which also installs its outbox and event tables. A core-only installation should
-not run both installers; adding Cloudflare outbound later needs its additional
-tables and explicit sending-account/domain configuration. The receiving-only core
-does not automatically become a Cloudflare sending account when the adapter loads.
-
 ## Sending from customer subdomains
 
 Cloudflare onboards each sending domain/subdomain separately. Parent-domain
 verification and wildcard receiving do not authorize arbitrary From subdomains.
 Use an explicitly verified sending domain and, where useful, a customer-specific
 inbound Reply-To. See [Cloudflare's subdomain rules](https://developers.cloudflare.com/email-service/configuration/subdomains/).
-
-## Development and release
-
-From the repository root, `bundle exec rake test` exercises both the compatibility
-API and standalone core. `bundle exec ruby script/verify_package.rb` builds both
-archives, installs a Rails-free consumer, and tests the packaged Rails integrations.
-Publish `mailbox-kit` before releasing a Cloudflare version that depends on it.

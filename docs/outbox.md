@@ -166,10 +166,9 @@ For a partial operation, only unresolved recipients can be reconciled. Omit `rec
 
 For a `sending` operation, first stop the original sender and verify it cannot resume. Reconciliation additionally requires `confirm_sender_stopped: true` and a claim at least 15 minutes old. Elapsed time alone is insufficient. There is no automatic lease expiry or timeout-based resend.
 
-## Data ownership and migration
+## Stored data
 
-The gem owns its operation, recipient, receipt, and reconciliation infrastructure. The inbox owns mailbox permissions, conversations, approval policy, AI drafts, and UI. Link product records to operations by a stable key or application foreign key instead of copying the ledger algorithm.
-
-The MIME snapshot contains email bodies, addresses, and attachments. Apply your application's database access, encryption, backup, and retention policies. Removing ledgers or replaying old backups can discard uncertainty and deduplication evidence; quiesce sending and reconcile provider activity during recovery.
-
-Importing historical attempts is application-specific. If the old application did not save exact MIME, a reconstructed snapshot is historical metadata, not proof of the original bytes. Preserve its known/unknown state and do not turn imported accepted or uncertain attempts into dispatchable `prepared` operations. The generated outbox and receipt migrations refuse rollback to preserve delivery and deduplication evidence; use a forward fix or a reconciled backup.
+The outbox saves message bodies, addresses, attachments, and delivery history.
+Apply your application's database access, encryption, backup, and retention policies.
+Keep deduplication and acceptance evidence when restoring data so a recovery
+does not resend accepted mail.

@@ -37,15 +37,15 @@ idempotent. Durable transport is not an exactly-once delivery guarantee.
 
 ## Optional features
 
-- [Management engine](management-engine.md): mount a server-rendered mailbox UI
+- [Management engine](../docs/management-engine.md): mount a server-rendered mailbox UI
   with host authentication, scopes, and permissions. It is not mounted automatically.
-- [Mailboxes](mailboxes.md): enable domain catch-all explicitly on an existing
+- [Mailboxes](../docs/mailboxes.md): enable domain catch-all explicitly on an existing
   active address. Follow the catch-all schema upgrade instructions; exact
   registered addresses still take precedence, and sending remains exact-address only.
-- [Custom ingestion](custom-ingress.md): integrate verified envelopes and raw
+- [Custom ingestion](../docs/custom-ingress.md): integrate verified envelopes and raw
   persistence into an existing app. Deploy Rails before enabling v3 metadata
   signatures in a custom Worker; ordinary v2 forwarding remains supported.
-- [Routing delivery confirmation](routing-deliveries.md): configure separate
+- [Routing delivery confirmation](../docs/routing-deliveries.md): configure separate
   analytics credentials and durable receipts if needed. API acceptance alone
   is not proof of delivery, and ambiguous evidence must not trigger a resend.
 

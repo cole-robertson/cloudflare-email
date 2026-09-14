@@ -1,7 +1,5 @@
 # Use your existing inbound email pipeline
 
-This integration API is available in gem version 0.3.0.
-
 You can adopt mailbox registration without replacing your Worker, document processing, sender review, or archive. Use the gem to authenticate the request and resolve an accepted address, then keep your application's policy and processing.
 
 A useful starting point is one mailbox per site: an organization owns a receiving domain, a site owns a mailbox, and that mailbox can have several accepted addresses. This is an application convention, not a requirement of the gem. Database tenancy is optional; a single SQLite database works too.
@@ -181,7 +179,7 @@ const headers = await signedEmailHeaders({
 // Send exactly raw with these headers using your existing transport.
 ```
 
-Here `cloudflare-ingress.js` is your local copy of the template's `src/index.js`. `raw` and `archiveKey` come from your existing bounded reader and archive operation. See the [Worker integration instructions](../templates/worker/README.md) for supported metadata values and forwarding behavior. Upgrade the Rails receiver before enabling v3 in the Worker.
+Here `cloudflare-ingress.js` is your local copy of the template's `src/index.js`. `raw` and `archiveKey` come from your existing bounded reader and archive operation. See the [Worker integration instructions](../templates/worker/README.md) for supported metadata values and forwarding behavior.
 
 In your Action Mailbox handler, read persisted metadata through the gem:
 
@@ -197,15 +195,3 @@ This reads verified Active Storage metadata, not similarly named MIME headers. A
 **A valid Worker signature proves that your trusted Worker submitted the request. It does not prove the original email sender is authentic.** Even metadata labelled `source: "cloudflare"` is an assertion made by the holder of the ingress secret. Do not copy sender-controlled MIME headers into a “trusted authentication” field. If your existing Worker has reliable authentication evidence, preserve its documented provenance and let your application decide how that evidence affects acceptance. The gem intentionally does not infer SPF/DMARC results or implement a sender allowlist.
 
 Retries with the same recipient, raw bytes, and metadata context reuse the inbound record. Aliases receive distinct membership context. Changing signed metadata produces a distinct checksum: stable values are preferable to per-attempt timestamps or random IDs. Keep downstream document extraction and external side effects idempotent too.
-
-## Adopt incrementally
-
-1. Inventory existing accepted addresses, organization/subdomain mappings, fallback destinations, and disabled sites. Backfill records explicitly; do not silently create a mailbox for every incoming address.
-2. Confirm existing Worker routing for one organization's exact domain and activate only verified addresses. Exercise an alias, unknown address, suspended mailbox, and cross-tenant destination with synthetic mail.
-3. Add request verification and preserve your current sender review, archive behavior, error responses, and size limits. Test that rejected or held mail cannot reach the processing queue.
-4. Connect site provisioning to the same mailbox API used by the [management engine](management-engine.md). Scope the engine through existing host authentication and authorization.
-5. Retire duplicate infrastructure only after comparing delivery and recovery behavior. Inbound adoption does not require switching your outbound provider.
-
-Keep the shared operational communications history separate from tenant-local raw emails and mailbox membership when those serve different purposes. Define who owns deletion, archive retention, deduplication, and processing status; two competing delivery ledgers make recovery harder.
-
-The gem's custom-ingress integration test exercises a custom controller against two real SQLite tenant databases, preserving binary MIME bytes and signed metadata before routing jobs run. It also verifies rejected metadata, host review, accepted-address enforcement, and retry behavior. It does not verify a deployed customer's Cloudflare DNS, Worker authentication evidence, R2 archive, or document-processing pipeline; those require that host's end-to-end tests.

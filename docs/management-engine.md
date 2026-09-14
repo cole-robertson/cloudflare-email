@@ -1,11 +1,9 @@
-# Optional mailbox management engine
+# Mailbox management UI
 
 The management engine is a small, server-rendered Rails interface for the
 [managed mailbox APIs](mailboxes.md). It works with ordinary Rails apps and with
 apps using Inertia, React, Turbo or another frontend. No JavaScript, Node build,
 asset pipeline or frontend package is required for the engine.
-
-This feature is available in RubyGems 0.3.0.
 
 ## What you get
 

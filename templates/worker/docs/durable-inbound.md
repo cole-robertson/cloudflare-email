@@ -5,12 +5,6 @@ The bundled Worker uses R2 storage, Queue delivery and scheduled recovery by
 default. No enable flag, Rails model, database, or tenancy change is needed.
 Missing infrastructure fails visibly; it never silently downgrades to direct delivery.
 
-Upgrade the Rails gem before deploying this Worker. New messages without a parseable
-Message-ID use a deterministic fallback for deduplication across Rails hosts.
-Older records created before this change use ActionMailbox's hostname-dependent
-fallback; replaying those historical messages after upgrading can create a new
-record. Reconcile any existing archive backlog before replaying it automatically.
-
 ## Set it up
 
 Create a private R2 bucket and a Queue for each environment:
@@ -23,8 +17,7 @@ npx wrangler queues create cloudflare-email-inbound-production
 The bundled `wrangler.toml` already configures these resources for each environment.
 Customize their names if needed. Configure **all three** pieces: the `INBOUND_EMAIL_STORE` R2
 binding, `INBOUND_EMAIL_QUEUE` producer and consumer, and the once-per-minute
-scheduled trigger. Keep `RAILS_INGRESS_URL` and `INGRESS_SECRET` configured as
-before. Deploy with `npm run deploy -- --env production`.
+scheduled trigger. Keep `RAILS_INGRESS_URL` and `INGRESS_SECRET` configured. Deploy with `npm run deploy -- --env production`.
 
 Use separate buckets, queues and secrets for staging and production. Do not add
 an R2 lifecycle rule that expires `cloudflare-email/pending/` objects. Pending
@@ -38,7 +31,7 @@ binding, and minute schedule before changing code or secrets. This check does no
 validate the bucket lifecycle or queue consumer: verify those in your infrastructure
 configuration and live drill. The Ruby task does not provision resources.
 
-## Direct fallback and upgrades
+## Direct fallback
 
 Set `INBOUND_DELIVERY_MODE = "direct"` in the environment's Wrangler vars only when
 you deliberately want a single HTTP handoff. With the Ruby task, pass
@@ -49,15 +42,10 @@ recovery continue draining previously retained mail. To return to durable delive
 remove the Wrangler override or pass `INBOUND_DELIVERY_MODE=durable` to the Ruby task.
 Unknown values fail rather than choosing a transport implicitly.
 
-The old `DURABLE_INBOUND_ENABLED` rollout flag has been removed. Existing direct
-installations must provision the resources before upgrading the Worker, or explicitly
-select `INBOUND_DELIVERY_MODE=direct` before deploying. Upgrading the Ruby gem alone
-does not redeploy a Worker or change live routing.
-
 ## What happens to a message
 
 1. The Worker validates the envelope and actual MIME size. Invalid or oversized
-   mail is permanently rejected, as in direct mode.
+   mail is permanently rejected.
 2. It writes one R2 object containing the exact raw bytes, SMTP envelope, original
    receive time, and optional provider metadata. It waits for the write before
    returning from the Email Worker handler.
@@ -129,7 +117,7 @@ callback is not canceled. Set `archiveTimeoutMs` to an integer from 1 to 120,000
 milliseconds to fit your host's runtime budget. Treat bytes as read-only and never parse the private
 pending frame to build an archive. The primary R2 write is always mandatory.
 Trusted provider metadata is captured once at receipt, never recomputed on replay.
-The existing `relayEmail` archive callback is best effort and does not enable this
+The `relayEmail` archive callback is best effort and does not enable this
 durable protocol automatically.
 
 ## Guarantee boundary
