@@ -92,11 +92,16 @@ class MailboxGeneratorInstallationTest < Minitest::Test
       migrate(path, database)
       connection = ActiveRecord::Base.connection
       connection.remove_index(:cloudflare_email_mailbox_messages, name: "idx_cf_email_message_inbound")
+      connection.change_column_null(:cloudflare_email_receiving_domains, :account_id, false)
+      connection.execute("INSERT INTO cloudflare_email_receiving_domains (domain, tenant_key, account_id, created_at, updated_at) VALUES ('old.example.com', 'one', 'existing-account', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)")
       connection.execute("INSERT INTO cloudflare_email_mailboxes (id, tenant_key, name, created_at, updated_at) VALUES (1, 'one', 'Existing', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)")
       connection.execute("INSERT INTO cloudflare_email_mailbox_messages (tenant_key, mailbox_id, inbound_email_id, recipient, created_at, updated_at) VALUES ('one', 1, 42, 'old@example.com', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)")
       MailboxKit::Generators::UpgradeGenerator.start(["--quiet"], destination_root: dir)
       migrate(path, database)
       assert_inbound_lookup_uses_index
+      assert_equal "existing-account", connection.select_value("SELECT account_id FROM cloudflare_email_receiving_domains")
+      connection.execute("INSERT INTO cloudflare_email_receiving_domains (domain, tenant_key, created_at, updated_at) VALUES ('new.example.com', 'one', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)")
+      assert_nil connection.select_value("SELECT account_id FROM cloudflare_email_receiving_domains WHERE domain = 'new.example.com'")
       assert_equal "old@example.com", connection.select_value("SELECT recipient FROM cloudflare_email_mailbox_messages")
       IndexMailboxKitInboundMessages.new.migrate(:up)
       assert_equal 1, connection.select_value("SELECT COUNT(*) FROM cloudflare_email_mailbox_messages")

@@ -5,7 +5,7 @@ Cloudflare constants and tenant job payloads. Keep your initializer, mounted
 engine, Worker and application processing code. Do not run `mailbox_kit:install`
 or the Cloudflare mailbox installer over existing mailbox tables.
 
-After updating the gems, generate the additive index migration:
+After updating the gems, generate the index and receiving-domain migrations:
 
 ```sh
 bin/rails generate mailbox_kit:upgrade
@@ -15,13 +15,19 @@ bin/rails db:migrate
 For separate tenant databases:
 
 ```sh
-bin/rails generate mailbox_kit:upgrade --tenant-migrations-path=db/tenant_migrate
+bin/rails generate mailbox_kit:upgrade --tenant-migrations-path=db/tenant_migrate --directory-migrations-path=db/migrate
 ```
 
-Apply that migration to every database containing mailbox messages using your
+Apply the index migration to every database containing mailbox messages using your
 application's tenant migration runner. It does not belong in the shared domain
 directory database. The migration preserves messages and skips an existing
 single-column inbound index. New installers already include this index.
+
+Apply `AllowProviderNeutralReceivingDomains` to the shared directory database.
+It allows a null receiving-domain account ID, preserving existing account values.
+Receiving-only registration requires no Cloudflare account; sending still requires
+an explicit account and verified sending domain. On SQLite this schema change can
+rebuild the directory table, so use your normal migration window.
 
 Index creation can block writes on large tables. Plan its application according
 to your database's normal migration procedure; PostgreSQL installations needing
