@@ -9,7 +9,7 @@ into public logs or issues.
 
 | What you see | What to check next |
 | --- | --- |
-| New generator or API is missing | Check `Gemfile.lock`. The new features require the [0.2 commit](getting-started.md#install-the-current-code); published 0.1.0 lacks them. |
+| New generator or API is missing | Check `Gemfile.lock`. Use cloudflare-email 0.4.x with mailbox-kit 0.1.x; follow the [installation guide](getting-started.md#install-the-current-code). |
 | Credentials appear to be ignored | Nonempty Rails credentials override environment variables. Check the Rails environment and restart the app after changes. |
 | Authentication or domain error | Run `bin/rails cloudflare:email:doctor`; check account ID, token permissions and sending-domain verification. |
 | `doctor` reports limited read access | A send token may lack diagnostic read permissions. Review the specific result; diagnostics alone cannot prove whether sending works. |

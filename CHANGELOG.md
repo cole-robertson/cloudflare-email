@@ -1,6 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 — 2026-09-14
+
+Released alongside Mailbox Kit 0.1.0. Cloudflare installs the core automatically.
+Existing installations should follow the [core upgrade guide](mailbox-kit/docs/upgrading.md).
+
+- Allow receiving domains without a sending account. The upgrade generator
+  preserves existing directory records while making account ownership optional.
 
 - Index inbox memberships by inbound email for recipient isolation checks,
   retention and purge. New schemas include the index; `mailbox_kit:upgrade`

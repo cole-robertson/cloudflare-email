@@ -15,15 +15,16 @@ processing jobs. Mailbox Kit adds the inbox your users interact with.
   email to inboxes. Follow the example below.
 - **Only processing incoming email:** Action Mailbox alone may be enough.
 
-This gem is not published yet. In this repository, add to your Gemfile:
+Add Mailbox Kit 0.1 to your Gemfile:
 
 ```ruby
-gem "mailbox-kit", path: "mailbox-kit"
+gem "mailbox-kit", "~> 0.1.0"
 ```
 
 For a new Rails 7.2–8.1 application:
 
 ```sh
+bundle install
 bin/rails action_mailbox:install
 bin/rails generate mailbox_kit:install
 bin/rails db:migrate

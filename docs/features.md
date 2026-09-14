@@ -5,7 +5,7 @@ services. You can use just the sending client, add incoming mail, or build a
 mailbox on top of the optional database-backed delivery tools.
 
 Start with [Getting started](getting-started.md) for working examples. These
-features are available in **0.3.0**. Database multi-tenancy is **off by default**:
+features are available in **0.4.0**, which includes **Mailbox Kit 0.1.0**. Database multi-tenancy is **off by default**:
 the optional mailbox module works in one database unless you explicitly configure
 a tenant connection adapter. A mailbox tenant key alone does not switch databases.
 

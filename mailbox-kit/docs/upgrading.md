@@ -53,8 +53,8 @@ Cloudflare integration guide; do not run both complete installers against the
 same database. Arbitrary subdomain receiving does not authorize sending from those
 subdomains: verify each Cloudflare sending domain separately.
 
-## Release order
+## Versions
 
-This extraction is unreleased. Publish `mailbox-kit` first, then a Cloudflare
-release depending on it. A passing local suite is not a production cutover;
-upgrade and verify a dogfood application before a wider rollout.
+Cloudflare Email 0.4.0 depends on Mailbox Kit 0.1.x and installs it automatically.
+Core-only applications can install `gem "mailbox-kit", "~> 0.1.0"` directly.
+Upgrade and verify your application's email flows before a wider rollout.
