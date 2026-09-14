@@ -83,6 +83,16 @@ access is denied until configured. See [management setup](docs/integration.md#ma
 
 ## The split
 
+Mailbox Kit works without Cloudflare. Cloudflare Email depends on this core and
+installs it automatically; applications using both APIs may list both gems in
+their Gemfile to make their direct dependencies explicit. Either declaration
+installs the same packages. Inboxes, database tenancy, and the management UI still
+require explicit setup. Installing the gem does not enable them.
+
+The core has no runtime gem dependencies and does not load Rails or Active Record
+for plain Ruby consumers. Rails applications supply their framework dependencies;
+the core registers Rails integration hooks when Rails is present.
+
 | Layer | Owns |
 | --- | --- |
 | Rails | Raw MIME, Active Storage, parsing, routing, processing jobs/status, cleanup policy, Action Mailer |

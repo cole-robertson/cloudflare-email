@@ -43,6 +43,33 @@ to add the inbound lookup index without recreating their tables.
 
 The sections below are the configuration and API reference.
 
+## How the two gems compose
+
+`cloudflare-email` depends on `mailbox-kit`, a provider-neutral foundation built
+on Rails Action Mailbox. Install just the Cloudflare gem when using Cloudflare;
+Bundler installs the core automatically. Install Mailbox Kit alone when using
+another inbound provider.
+
+Installing the core does not enable inboxes, database tenancy, or the management
+UI. Those features require explicit setup. The core has no runtime gem
+dependencies; plain Ruby sending does not load Rails or Active Record. In a Rails
+app, its Railtie registers integration hooks, but inbox retention remains inactive
+until mailboxes are enabled. Your app still supplies its Rails dependencies.
+
+The shared foundation also provides address validation, the Action Mailbox
+persistence bridge, and optional tenant-safe model/job support. Keeping one
+implementation lets Cloudflare's inbox and outbox use the same tenant context.
+Inbound and outbound providers can still be different: Rails supplies their
+Action Mailbox and Action Mailer integration points.
+
+If your app calls `MailboxKit` directly, declaring both gems makes those direct
+dependencies explicit. This is optional and installs the same two packages:
+
+```ruby
+gem "cloudflare-email", "~> 0.4.0"
+gem "mailbox-kit", "~> 0.1.0"
+```
+
 ## Install and send from Rails
 
 Add version 0.4 to your Gemfile. Existing mailbox users should follow the [core upgrade guide](mailbox-kit/docs/upgrading.md). When upgrading from 0.2, also follow the [durable Worker upgrade guide](docs/upgrading-0.3.md):
