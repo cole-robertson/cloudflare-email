@@ -14,7 +14,7 @@ durable infrastructure without copying the reference inbox's models and services
 | Shared event intake, tenant correlation and tenant-aware jobs | Durable queue workers, scheduled recovery and schema rollout to every tenant |
 | Structured/raw sending and ActionMailer transport | Compose UI, recipients and send authorization |
 | `Response#accepted?`, plus individual recipient outcomes | Handle partial acceptance without resending accepted recipients |
-| Authenticated ingress (default v2; opt-in v3 [metadata](custom-ingress.md)) and context-scoped deduplication | Map trusted recipient to an authorized mailbox; apply sender and document policy |
+| Authenticated ingress (default v2; opt-in v3 [metadata](../docs/custom-ingress.md)) and context-scoped deduplication | Map trusted recipient to an authorized mailbox; apply sender and document policy |
 | `MessageId.normalize` and returned provider IDs | Store conversation membership and scope reply lookups |
 | Queue decoding, validation and ACK | Queue/subscription setup and recurring execution |
 | Optional ActiveRecord event receipts, deduplication and indexed replay | Configure queue polling and receipt retention |
@@ -36,7 +36,7 @@ Historical verification reports describe their dated runs, not the current API.
 
 The inbox now uses the gem's ledger tables and orchestration. Its model subclasses
 add application message associations and display snapshots; they do not maintain
-a second sending ledger. See the [outbox guide](outbox.md) for installation and API.
+a second sending ledger. See the [outbox guide](../docs/outbox.md) for installation and API.
 
 1. Claim an application-supplied operation key scoped to an account using a unique
    index before sending; repeated or concurrent calls cannot silently resend.
@@ -97,9 +97,9 @@ operator permissions also stay there. Suppression/unsubscribe requirements depen
 on message purpose and application policy; expose provider outcomes, but do not
 silently impose a marketing subscription model on transactional mail.
 
-The optional [mailbox module](mailboxes.md) now packages mailbox persistence and
+The optional [mailbox module](../docs/mailboxes.md) now packages mailbox persistence and
 address management over the existing transport/receipt APIs. It includes a
-[tenant adapter](activerecord-tenanted.md), without adding a tenant library to
-the plain Ruby client. The optional [management engine](management-engine.md)
+[tenant adapter](../docs/activerecord-tenanted.md), without adding a tenant library to
+the plain Ruby client. The optional [management engine](../docs/management-engine.md)
 consumes these same APIs with host-supplied authentication and authorization.
 Full inbox products can continue using them through their own frontends.

@@ -168,14 +168,3 @@ database. Missing context must continue to fail closed. Your organization's job
 fan-out should enumerate real organizations, not every database file. Applications
 without configured multi-tenancy can keep ordinary system and organization mail
 in their existing single database; this recipe does not enable tenancy by default.
-
-## What is verified
-
-The optional CI job boots a real Rails application with `activerecord-tenanted`, runs the gem's tenant migrations in two SQLite databases, and checks identical numeric IDs remain isolated. It also verifies context restoration, refusal to create unknown tenant databases, and GlobalID's missing/wrong-tenant rejection. Separate integration tests exercise mailbox ingress, sending, jobs, and delivery-event replay.
-
-Run the library-specific smoke test locally with:
-
-```sh
-BUNDLE_GEMFILE=gemfiles/tenanted.gemfile bundle install
-BUNDLE_GEMFILE=gemfiles/tenanted.gemfile bundle exec ruby test/support/activerecord_tenanted.rb
-```

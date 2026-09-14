@@ -1,8 +1,8 @@
 # Tenant-aware mailbox layer — implementation proposal
 
 Status: original design record. The reusable mailbox module and tenant adapter
-are implemented on the feature branch; see [mailboxes](mailboxes.md) and
-[tenant setup](activerecord-tenanted.md) for the actual API. Rebulk application
+are implemented on the feature branch; see [mailboxes](../docs/mailboxes.md) and
+[tenant setup](../docs/activerecord-tenanted.md) for the actual API. Rebulk application
 migration and live customer rollout remain separate work. Based on the gem's merged 0.2
 code and Rebulk/rebulk-system main at
 `17ffafccb69968dae022acdbb4620b84c65bedfb`.

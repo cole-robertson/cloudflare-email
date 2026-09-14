@@ -1,204 +1,78 @@
-# cloudflare-email
+# Cloudflare Email
 
-Ruby client for [Cloudflare Email Service](https://developers.cloudflare.com/email-service/), with ActionMailer, authenticated ActionMailbox ingress, a forwarding Worker, and optional durable Rails sending and delivery-event tracking.
+Send and receive email in Ruby and Rails through [Cloudflare Email Service](https://developers.cloudflare.com/email-service/).
 
-Version **0.4.0**, with **Mailbox Kit 0.1.0**. Ruby 3.2+, Rails 7.2–8.1; Ruby 4.0 is tested with Rails 8.1. Supported test floors are Rails 7.2.3.2, 8.0.5.1, and 8.1.3.1. Prefer a maintained Ruby/Rails release for new applications. Rails and database dependencies remain optional for the plain Ruby client. Node is optional: Worker deployment also works through the included Ruby deployer. See [security guidance](SECURITY.md) for deployment responsibilities.
+Use your existing Rails mailers, receive messages through Action Mailbox, and add
+persistent inboxes with [Mailbox Kit](mailbox-kit/README.md). SQLite is supported.
+Database tenancy and the management UI are optional.
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/cole-robertson/cloudflare-email/tree/main/templates/deploy-to-cloudflare)
-
-Deploy the inbound Worker with guided R2/Queue provisioning and secret setup. [Prepare Rails and connect your email address](templates/deploy-to-cloudflare/README.md).
-
-## Start here
-
-**Starting in 0.4.0:** provider-neutral mailbox functionality lives in
-the sibling [Mailbox Kit](mailbox-kit/README.md) gem. Existing Cloudflare setup
-continues to work; the core requires no Cloudflare account. Installing
-`cloudflare-email` also installs `mailbox-kit` 0.1.x.
-Existing mailbox installations should use the [core upgrade guide](mailbox-kit/docs/upgrading.md)
-to add the inbound lookup index without recreating their tables.
-
-**Sending email?** Start with the [step-by-step Rails guide](docs/getting-started.md).
-**Building a mailbox?** Follow the same guide through receiving, the SQLite-compatible outbox, and delivery tracking.
-**Using plain Ruby?** Jump to [Plain Ruby](#plain-ruby); Rails and a database are optional.
-
-| Guide | What you will learn |
-| --- | --- |
-| [Features at a glance](docs/features.md) | Everything the gem handles, and what your app supplies |
-| [Getting started](docs/getting-started.md) | Install, send your first email, receive replies, and save reliable send operations |
-| [Cloudflare domain setup](templates/worker/docs/domain-setup.md) | Configure once for many mailboxes or dynamic organization subdomains, with a Rebulk example and DNS checks |
-| [Hello-world Rails template](https://github.com/cole-robertson/cloudflare-email-rails-starter) | Clone a minimal SQLite mailbox app using the published gem and its management UI |
-| [Troubleshooting](docs/troubleshooting.md) | What to check when mail or delivery updates do not arrive |
-| [Managed mailboxes](docs/mailboxes.md) | Create inboxes and aliases, read/archive mail, and send from a mailbox |
-| [Management engine](docs/management-engine.md) | Mount an optional server-rendered mailbox UI using your app's authentication |
-| [Custom ingress](docs/custom-ingress.md) | Reuse authentication, signed metadata, and tenant routing in your existing ingestion pipeline |
-| [Routing diagnostics](docs/routing-diagnostics.md) | Inspect exact-domain DNS and Worker routes without changing infrastructure |
-| [Reusable Worker pipeline](templates/worker/README.md#reuse-the-transport-in-an-existing-worker) | Keep custom backend and archive policies while sharing bounded email forwarding |
-| [Durable inbound delivery](templates/worker/README.md#durable-inbound-delivery) | Store incoming mail in R2 and recover Rails outages with queued retries and scheduled recovery |
-| [Routing delivery confirmation](docs/routing-deliveries.md) | Confirm qualifying normal-address deliveries using authenticated Routing analytics |
-| [SQLite tenant databases](docs/activerecord-tenanted.md) | Give each organization its own SQLite database with `activerecord-tenanted` |
-| [Durable outbox](docs/outbox.md) | Detailed setup, callbacks, retries, and recovery |
-| [Delivery events](docs/delivery-events.md) | Cloudflare Queue setup and recipient status tracking |
-| [Upgrading to 0.4](mailbox-kit/docs/upgrading.md) | Core extraction and data-preserving migrations for existing mailboxes |
-| [Upgrading from 0.2](docs/upgrading-0.3.md) | Additional changes before deploying the durable Worker |
-
-The sections below are the configuration and API reference.
-
-## How the two gems compose
-
-`cloudflare-email` depends on `mailbox-kit`, a provider-neutral foundation built
-on Rails Action Mailbox. Install just the Cloudflare gem when using Cloudflare;
-Bundler installs the core automatically. Install Mailbox Kit alone when using
-another inbound provider.
-
-Installing the core does not enable inboxes, database tenancy, or the management
-UI. Those features require explicit setup. The core has no runtime gem
-dependencies; plain Ruby sending does not load Rails or Active Record. In a Rails
-app, its Railtie registers integration hooks, but inbox retention remains inactive
-until mailboxes are enabled. Your app still supplies its Rails dependencies.
-
-The shared foundation also provides address validation, the Action Mailbox
-persistence bridge, and optional tenant-safe model/job support. Keeping one
-implementation lets Cloudflare's inbox and outbox use the same tenant context.
-Inbound and outbound providers can still be different: Rails supplies their
-Action Mailbox and Action Mailer integration points.
-
-If your app calls `MailboxKit` directly, declaring both gems makes those direct
-dependencies explicit. This is optional and installs the same two packages:
-
-```ruby
-gem "cloudflare-email", "~> 0.4.0"
-gem "mailbox-kit", "~> 0.1.0"
-```
-
-## Install and send from Rails
-
-Add version 0.4 to your Gemfile. Existing mailbox users should follow the [core upgrade guide](mailbox-kit/docs/upgrading.md). When upgrading from 0.2, also follow the [durable Worker upgrade guide](docs/upgrading-0.3.md):
+## Install
 
 ```ruby
 gem "cloudflare-email", "~> 0.4.0"
 ```
+
+Mailbox Kit installs automatically. If you use another email provider, you can
+[use Mailbox Kit on its own](mailbox-kit/README.md).
+
+Requires Ruby 3.2+; Rails integrations support Rails 7.2–8.1.
+Use a current patch release. Plain Ruby sending does not require Rails or a database.
+
+## Send from Rails
 
 ```sh
 bundle install
 bin/rails generate cloudflare:email:install --no-inbound
 ```
 
-Add Rails credentials (encrypted, per environment) or environment variables:
-
-```yaml
-cloudflare:
-  account_id: your-account-id
-  api_token: your-email-sending-token
-```
+[Verify a sending domain in Cloudflare](https://developers.cloudflare.com/email-service/configuration/domains/)
+and add your account ID and sending token:
 
 ```sh
 export CLOUDFLARE_ACCOUNT_ID=your-account-id
 export CLOUDFLARE_API_TOKEN=your-email-sending-token
 ```
 
-The generated initializer uses `Cloudflare::Email::Credentials`: nonempty Rails credentials take precedence, then `CLOUDFLARE_*` environment variables. For an existing 0.1.0 installation, update the initializer manually; see [upgrading](docs/upgrading-0.2.md).
-
-Onboard a sending domain under **Compute → Email Service → Email Sending**. Use a dedicated sending subdomain if the apex already uses another mail provider. Cloudflare's onboarding adds the required bounce MX, SPF, DKIM, and DMARC records for that sending domain. Follow the current [domain configuration](https://developers.cloudflare.com/email-service/configuration/domains/) instructions; do not replace an existing apex SPF record or publish a second one.
-
-Create a token with permission to send for your account, and verify the domain in the dashboard before testing:
-
-```sh
-bin/rails cloudflare:email:doctor
-FROM=hello@mail.example.com TO=you@example.net bin/rails cloudflare:email:send_test
-```
-
-`doctor` checks configuration and available read access. It does not send mail or prove deliverability. `send_test` requires both `FROM` and `TO`.
-
-Standard ActionMailer works:
+Your regular mailers can now send through Cloudflare:
 
 ```ruby
-class WelcomeMailer < ApplicationMailer
-  def welcome(user)
-    mail(from: "hello@mail.example.com", to: user.email, subject: "Welcome") do |format|
-      format.text { render plain: "Hello!" }
+class HelloMailer < ApplicationMailer
+  def hello(address)
+    mail(from: "hello@mail.example.com", to: address, subject: "Hello") do |format|
+      format.text { render plain: "Hello from Rails!" }
     end
   end
 end
 
-WelcomeMailer.welcome(user).deliver_later
+HelloMailer.hello("you@example.net").deliver_now
 ```
 
-Multipart, attachments, cc/bcc, and threading headers are serialized through `send_raw`. Cloudflare still controls final delivery and header acceptance.
+HTML templates, attachments, multipart messages, cc/bcc, and reply headers work
+through Action Mailer. Follow the [Rails setup guide](docs/getting-started.md)
+for receiving and delivery tracking.
 
-## Managed mailboxes and optional tenancy
+## Receive email
 
-**Multi-tenancy is off by default.** Installing the gem does not create tenant
-databases, install a tenancy library, or change your application's database routing.
+The included Worker stores incoming email at Cloudflare and retries delivery
+while Rails is unavailable. Rails verifies each request and stores the original
+email through Action Mailbox.
 
-| Setup | What you explicitly enable |
-| --- | --- |
-| Plain Ruby sending | Nothing extra; no Rails/database required |
-| Managed mailboxes in one database | Run the mailbox generator and load the optional module |
-| Separate tenant databases | Configure `Tenancy.configure(...)` with your application's base class and switching adapter before loading models |
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/cole-robertson/cloudflare-email/tree/main/templates/deploy-to-cloudflare)
 
-The mailbox API uses a tenant key to group and scope records even in one database.
-That key alone does not enable database switching. `activerecord-tenanted` is an
-optional application dependency, not a runtime dependency of this gem.
+[Prepare Rails and deploy the Worker](templates/deploy-to-cloudflare/README.md),
+then connect your receiving address in Cloudflare Email Routing.
 
-Create mailboxes in code with the optional mailbox module. It includes named
-mailboxes, aliases, ownership references, read/archive state, retained raw mail,
-mailbox-authorized sends, and tenant-aware delivery-event recovery:
+## Build an inbox
 
-```sh
-bin/rails generate cloudflare:email:mailboxes
-bin/rails db:migrate
-```
+The [mailbox guide](docs/mailboxes.md) walks through creating inboxes and aliases,
+receiving mail, marking it read, archiving it, and sending replies.
 
-After registering and verifying a receiving domain:
+Mount the optional [management UI](docs/management-engine.md) to manage mailboxes
+and read messages using your app's login and permissions. It is server-rendered
+and needs no frontend build.
 
-```ruby
-Cloudflare::Email::Mailboxes.for_tenant("organization-123") do |inboxes|
-  mailbox = inboxes.create(name: "Support", address: "support@acme.example.com",
-    owner_ref: "team:42")
-  # Provision and activate its address route before receiving or sending mail.
-end
-```
-
-Use one database or an application-provided tenant base class. The optional
-`activerecord-tenanted` integration is tested with separate SQLite databases,
-including jobs and overlapping record IDs. Your app still authorizes users and
-provides the UI. Start with [the mailbox guide](docs/mailboxes.md), and configure
-[tenant connections](docs/activerecord-tenanted.md) before loading models when
-using separate databases. Plain Ruby users do not load this module.
-
-## Durable mailbox delivery from Rails
-
-For a mailbox application, use the optional outbox instead of recreating send
-claims, attempt records, recipient outcomes, and event correlation:
-
-```sh
-bin/rails generate cloudflare:email:tracking
-bin/rails generate cloudflare:email:outbox
-bin/rails db:migrate
-```
-
-```ruby
-account = Cloudflare::Email::Credentials.account_id
-operation = Cloudflare::Email::ActiveRecord::Outbox.prepare_mail(
-  account_id: account,
-  operation_key: "reply:#{draft.id}:revision:#{draft.revision}",
-  mail: ReplyMailer.reply(draft).message,
-)
-# Enqueue after the transaction that prepared the operation commits.
-Cloudflare::Email::SendJob.perform_later(account, operation.operation_key)
-```
-
-The job sends the stored MIME once per operation claim. Accepted repeats cannot
-resend; uncertain sends remain blocked for audited reconciliation. Each recipient
-has separate acceptance evidence and lifecycle status. `DeliveryEvents` persists,
-deduplicates, correlates, orders, and replays queue events, with transactional
-callbacks for your product records. The reference Rails inbox uses these same
-tables and APIs for compose, replies, approved AI drafts, and recovery.
-
-`ReplyMailer`, `draft`, and its revision are application examples. Authorize the
-send before preparation and use a durable job backend. See the [complete outbox
-setup and recovery guide](docs/outbox.md) and [gem/inbox architecture](docs/architecture.md).
-The adapter is opt-in; the plain Ruby client does not load Rails or ActiveRecord.
+For a runnable SQLite example, clone the
+[hello-world Rails app](https://github.com/cole-robertson/cloudflare-email-rails-starter).
 
 ## Plain Ruby
 
@@ -211,250 +85,33 @@ client = Cloudflare::Email::Client.new(
 )
 
 response = client.send(
-  from: { address: "hello@mail.example.com", name: "Example" },
+  from: "hello@mail.example.com",
   to: "you@example.net",
   subject: "Hello",
-  text: "Plain body",
-  html: "<p>HTML body</p>",
-  reply_to: "support@in.example.com",
+  text: "Hello from Ruby!",
 )
-response.message_id             # Provider ID when returned; nil on older responses
-response.delivered              # Immediately delivered recipients
-response.queued                 # Recipients queued for later delivery
-response.permanent_bounces      # Recipients that permanently bounced
-response.suppressed_recipients  # Recipients dropped by suppression policy
+response.message_id
+response.accepted?
 ```
 
-`to` may be omitted for cc-only or bcc-only mail. Addresses accept strings or `{ address:, name: }` hashes. Attachments use Cloudflare's `content` (base64), `filename`, `type`, `disposition`, and optional `content_id` fields. For full MIME control, use `client.send_raw(from:, recipients:, mime_message:)`.
-
-An HTTP success does not mean every recipient received the message. Inspect the recipient outcome arrays and use [delivery events](docs/delivery-events.md) for later results. The current API reference includes message IDs and suppressed recipients; older responses remain supported.
-
-Cloudflare currently limits ordinary sends to 50 recipients and 5 MiB including attachments; verified destination addresses have a 25 MiB allowance. These limits are enforced by Cloudflare. See [limits](https://developers.cloudflare.com/email-service/platform/limits/) and the [header allowlist](https://developers.cloudflare.com/email-service/reference/headers/).
-
-## Receive through ActionMailbox
-
-Cloudflare Email Routing invokes an Email Worker. The bundled Worker forwards unchanged raw MIME to Rails with a versioned HMAC-SHA256 signature covering the timestamp, SMTP envelope, and body. Rails verifies the signature and a five-minute timestamp window before storing the message in ActionMailbox.
-
-```sh
-bin/rails generate cloudflare:email:install
-```
-
-The interactive installer offers ActionMailbox installation/migrations and a default `MainMailbox`, copies the Worker, and configures ingress in development and production. Add `--all-envs` to include test; configure custom staging environments explicitly. Send-only apps do not need ActionMailbox.
-
-Add the generated ingress secret and an optional management token:
-
-```yaml
-cloudflare:
-  account_id: your-account-id
-  api_token: your-runtime-send-token
-  management_token: your-deployment-token
-  ingress_secret: the-generated-random-secret
-```
-
-Equivalent environment names are `CLOUDFLARE_MANAGEMENT_TOKEN` and `CLOUDFLARE_INGRESS_SECRET`. Keep management credentials in the deployment environment rather than the running application. Credentials stored in the application's Rails credentials are accessible to that application; this gem is not a secret-isolation boundary.
-
-1. Add the receiving subdomain, for example `in.example.com`, in **Email Routing → apex domain → Settings → Subdomains**. This is a separate onboarding step from sending.
-2. Deploy the environment's Worker and create its route:
-
-First create the private R2 bucket and Queue, then deploy the generated Wrangler
-configuration using the [durable setup guide](templates/worker/docs/durable-inbound.md).
-The Ruby task below updates that provisioned Worker while preserving its bindings.
-It refuses a missing bucket/queue binding or recovery schedule before changing code.
-
-```sh
-RAILS_ENV=production bin/rails cloudflare:email:deploy_worker URL=https://app.example.com/rails/action_mailbox/cloudflare/inbound_emails
-RAILS_ENV=production bin/rails cloudflare:email:provision_route ADDRESS=support@in.example.com
-```
-
-Subdomain provisioning checks configured DNS before creating a rule. It never enables the parent apex on behalf of a subdomain. A missing setup or permission fails with instructions. DNS records alone do not prove propagation or live routing; send a real test afterward.
-
-For a zone apex, provisioning may enable Email Routing and its DNS records. Only use this when Cloudflare should handle mail for that apex. `provision_catchall DOMAIN=example.com` changes the **zone-wide** catch-all; a subdomain that resolves to a parent zone is rejected. See [subdomain onboarding](https://developers.cloudflare.com/email-service/configuration/subdomains/).
-
-Replace the scaffolded mailbox's `process` with your application logic. For tenant or mailbox selection, use the authenticated SMTP recipient rather than the sender-controlled MIME `To`/`Cc` headers:
-
-```ruby
-class ApplicationMailbox < ActionMailbox::Base
-  routing ->(inbound) { Cloudflare::Email::Envelope.for(inbound)&.fetch("to")&.match?(/\Asupport@/i) } => :support
-end
-```
-
-`Cloudflare::Email::Envelope.for(inbound_email)` returns a string-keyed `{"from" => "sender@example.com", "to" => "support@example.com"}` hash, or `nil` when the record has no authenticated envelope (for example, another ingress). The metadata is stored on the raw-email blob before routing jobs enqueue. It does not modify the MIME source. Envelope sender information records the SMTP reverse path; it does not authenticate the human sender. An empty `from` is valid for bounces.
-
-The bundled Worker uses v2 signatures by default; missing or v1 signatures are rejected. The custom-ingress API also supports opt-in v3 signatures carrying authenticated Worker metadata. See [custom ingestion](docs/custom-ingress.md) and upgrade the Rails receiver before enabling v3 in a custom Worker. When upgrading from v1, coordinate Rails and Worker deployment while ingress is paused. Both envelope versions require ASCII dot-atom addresses, at most 254 bytes with a 64-byte local part. Quoted local parts, address literals, and internationalized addresses are not supported by this envelope format.
-
-Successful ingress storage returns HTTP 200; duplicate storage returns 200 too. The timestamp window limits request age, but is not a one-time replay ledger. Version 2 deduplication includes the exact SMTP recipient, so identical MIME delivered to separate To/Cc/Bcc recipients creates separate inbound records while a retry for the same recipient creates none.
-
-The Worker has a 15-second Rails request timeout and rejects redirects. Its default [durable inbound path](templates/worker/README.md#durable-inbound-delivery) saves messages in R2 before acceptance, then retries Rails handoffs through Queues and scheduled recovery. Provision the resources before deploying. `INBOUND_DELIVERY_MODE=direct` selects the single-attempt fallback, which can reject mail during an outage; existing retained mail keeps recovering. Rails storage acceptance does not guarantee later mailbox-job success. Monitor Rails jobs and Cloudflare Worker logs.
-
-### Local development and deployment
-
-For a simple development tunnel, use the explicit direct fallback. Start Rails, then:
-
-```sh
-INBOUND_DELIVERY_MODE=direct bin/rails cloudflare:email:deploy_worker
-bin/rails cloudflare:email:dev
-```
-
-The dev task requires `cloudflared`, refuses environments other than development, and updates the existing development Worker's URL to a temporary tunnel. It forces a dedicated origin Host; development middleware permits only POSTs to the email ingress on that Host. Restart Rails after upgrading: the task checks that the guard is running before opening the tunnel. Configure a separate development receiving address and route. Stopping the tunnel leaves that URL in the development Worker until the next update. A Worker deployed without a URL rejects mail until the tunnel sets it.
-
-For a custom installer `--worker-dir`, pass `SCRIPT=custom-directory/src/index.js` to the Ruby `deploy_worker` task. The installer prints the corresponding command.
-
-Ruby deployment and Wrangler use matching names: `cloudflare-email-ingress-development`, `-staging`, and `-production`. Initial durable infrastructure deployment uses Wrangler and requires Node 22.12+ (or a supported newer version):
-
-```sh
-cd cloudflare-worker
-npm ci
-npx wrangler secret put INGRESS_SECRET --env production
-npx wrangler secret put RAILS_INGRESS_URL --env production
-npm run deploy -- --env production
-```
-
-See the [Worker README](templates/worker/README.md). Existing deployments/templates are not automatically migrated; verify routing before switching names.
-
-Rotate the shared ingress secret in Rails and the corresponding Worker during a coordinated deployment. This version has no overlapping-key rotation window; requests can fail while secrets differ.
-
-## Outbound delivery events
-
-The new `DeliveryEvent` and `EventConsumer` APIs consume Cloudflare Email Sending lifecycle events through an HTTP pull queue: delivered, deferred, bounced, failed, rejected, and complained.
-
-```ruby
-consumer = Cloudflare::Email::EventConsumer.new(
-  account_id: ENV.fetch("CLOUDFLARE_ACCOUNT_ID"),
-  api_token: ENV.fetch("CLOUDFLARE_QUEUES_TOKEN"),
-  queue_id: ENV.fetch("CLOUDFLARE_EVENT_QUEUE_ID"),
-  domains: ["mail.example.com"],
-)
-consumer.poll do |event|
-  DeliveryEventProcessor.call(event) # Your durable, idempotent application handler
-end
-```
-
-Each event is acknowledged only after the handler returns normally. Configure a dedicated queue, subscription, retry policy, and dead-letter queue first. See the complete [Rails and Ruby delivery-event setup](docs/delivery-events.md).
-
-Rails applications can run `bin/rails generate cloudflare:email:tracking` and
-`bin/rails db:migrate` to install optional durable event receipts. The adapter
-commits before ACK, deduplicates account/event IDs, retains unmatched events,
-and replays them with transactional application handlers. It requires explicit
-opt-in; the plain Ruby client stays independent of ActiveRecord.
-
-Shared helpers include `Response#accepted?` (any provider acceptance, not final
-delivery) and `DeliveryEvent#supersedes?(occurred_at:, terminal:)` for ordering
-matched recipient events. See the [architecture guide](docs/architecture.md) for
-what the gem provides and what belongs in the inbox product.
-
-Applications using the outbox can use `DeliveryEvents.record(event)` and
-`DeliveryEvents.replay(account_id:, message_id:)` for built-in correlation and
-recipient-state projection. Applications with their own delivery schema can
-continue to use the lower-level `EventInbox` with an explicit handler.
-
-## Thread correlation
-
-Prefer storing the provider's returned `message_id` with your conversation and correlating inbound `In-Reply-To` / `References` against that record. Correlation does not authenticate the sender or authorize an action.
-
-Use `Cloudflare::Email::MessageId.normalize(value)` to trim whitespace and one enclosing angle-bracket pair without changing the ID's case. The old `SecureMessageId` helper has been removed.
-
-Cloudflare's current [header documentation](https://developers.cloudflare.com/email-service/reference/headers/) describes Message-ID as platform-controlled. **The September 10 live test confirmed that Cloudflare replaced custom signed IDs**, including raw-MIME and ActionMailer sends. Store the provider ID for Cloudflare reply correlation. See [thread correlation](docs/thread-correlation.md) and the [live evidence](docs/verification/2026-09-10-live.md).
-
-## Retry and configuration
-
-`Client.new` options are also accepted by `config.action_mailer.cloudflare_settings`:
-
-| Option | Default |
-|---|---|
-| `account_id`, `api_token` | Required |
-| `base_url` | `https://api.cloudflare.com/client/v4` |
-| `timeout` | 30 seconds for open/read/write |
-| `total_timeout` | Defaults to `timeout`; bounds one complete HTTP attempt, including headers and streamed body |
-| `max_response_bytes` | 1 MiB for `Client`; 32 MiB for `EventConsumer` queue batches |
-| `retries` | 3 additional attempts |
-| `initial_backoff` | 0.5 seconds, doubling |
-| `max_retry_after` | 60 seconds |
-| `retry_ambiguous` | `false` |
-| `logger` | `nil`, optional `warn` logger |
-
-By default, only 429 responses and pre-send connection failures retry. Numeric and HTTP-date `Retry-After` values are honored up to the cap. Read/write timeouts, connection resets, and 5xx responses may occur after acceptance; they raise without automatically resending. Setting `retry_ambiguous: true` restores retries for those failures and can send duplicates.
-
-Responses are streamed with a byte limit, including decompressed content and
-error responses. A total deadline or response-size failure after transmission
-does not prove a send failed: the outbox preserves the ambiguous claim and blocks
-automatic resend. Net::HTTP's implicit retries are disabled. Explicit retries
-and backoff can make a logical call longer than `total_timeout`; queue handlers,
-database transactions and a complete polling run have separate runtime budgets.
-An uncertain queue acknowledgement permits receipt replay, never email resending.
-
-No idempotency key is sent. Reusing Message-ID does not guarantee deduplication or exactly-once delivery. Account for ActiveJob's retry policy too: retrying the whole mailer job can resend even when this client's retries are disabled.
-
-Errors inherit from `Cloudflare::Email::Error`: `ConfigurationError`, `AuthenticationError`, `ValidationError`, `RateLimitError`, `ServerError`, and `NetworkError`. API errors expose `status` and parsed `response`.
-
-## Observability and permissions
-
-Notifications: `cloudflare_email.send` / `send_raw` include `account_id`, `path`, `status`, `message_id`, and all four recipient outcome arrays. `cloudflare_email.ingress` includes `bytes`, `result` (`ok`, `duplicate`, `bad_signature`, `stale`, `too_large`), and the stored `message_id` when available. `cloudflare_email.delivery_event` wraps handler execution with `event_id`, `message_id`, and lifecycle `status`; it does not report queue acknowledgement completion. Instrumentation errors include ActiveSupport's exception metadata.
-
-| Task | Purpose / credentials |
-|---|---|
-| `doctor` | Read diagnostics with runtime token; limited read permissions are reported |
-| `send_test FROM=... TO=...` | Send a real message using runtime send permission |
-| `deploy_worker URL=https://...` | Management token: Workers Scripts Edit |
-| `provision_route ADDRESS=...` | Management token: Zone Read, Email Routing Rules Edit; DNS Read for subdomain checks; routing-settings write permission for apex enablement |
-| `provision_catchall DOMAIN=...` | Same routing management permissions; changes the zone-wide catch-all |
-| `dev` | Management token: Workers Scripts Edit; development only |
-| `consume_events` | Separate Queues Read/Write token, queue ID, configured handler |
-| `deliver OPERATION_KEY=...` | Dispatch a saved outbox operation using sending credentials |
-| `replay_events [MESSAGE_ID=...]` | Replay durable receipts for the configured account |
-| `pending_deliveries` | List prepared or uncertain outbox operations for operator review |
-
-The optional Rails adapter emits `cloudflare_email.outbox_prepare`,
-`cloudflare_email.outbox_send`, and `cloudflare_email.outbox_reconcile` notifications
-with operation identity and resulting state. These do not contain MIME or API
-tokens. A notification is method instrumentation; an enclosing application
-transaction may still roll back. Inspect the durable ledger for authoritative state.
-
-Management tasks fall back to the runtime token if `management_token` is unset. Restrict scopes and accounts to the operations you need. Event consumers use a separate `queues_token` and do not fall back to a send token.
-
-## SMTP alternative
-
-Cloudflare also supports authenticated SMTP. Existing Rails SMTP applications can use it without this gem's delivery method:
-
-```ruby
-config.action_mailer.delivery_method = :smtp
-config.action_mailer.smtp_settings = {
-  address: "smtp.mx.cloudflare.net",
-  port: 465,
-  ssl: true,
-  authentication: :plain,
-  user_name: "api_token",
-  password: ENV.fetch("CLOUDFLARE_SMTP_TOKEN"),
-}
-```
-
-Cloudflare documents Email Sending Edit permission for SMTP, implicit TLS on port 465, and no outbound STARTTLS on 587. See [SMTP documentation](https://developers.cloudflare.com/email-service/api/send-emails/smtp/). Remove the generated `:cloudflare` initializer override if switching to SMTP.
-
-## Development and verification
-
-```sh
-bundle install
-bundle exec rake test
-bundle exec ruby script/verify_package.rb
-BUNDLE_GEMFILE=gemfiles/rails_7_2.gemfile bundle install
-BUNDLE_GEMFILE=gemfiles/rails_7_2.gemfile bundle exec rake test
-cd templates/worker
-npm ci
-npm test
-npm run check
-npm audit
-```
-
-Tests include actual Rails boot/installation, ActionMailbox persistence and mailbox processing, task orchestration, HTTP-mocked API behavior, and Worker unit tests. CI also builds and installs the packaged gem and runs a real local workerd-to-Rails check. Run the latter with:
-
-```sh
-BUNDLE_GEMFILE=gemfiles/local_ingress.gemfile bundle install
-BUNDLE_GEMFILE=gemfiles/local_ingress.gemfile bundle exec ruby script/verify_local_ingress.rb
-```
-
-Install the Worker tooling first; Node 22+ must be on PATH (or set `NODE_BINARY` to its executable). This uses synthetic mail and temporary loopback services, not a deployed Cloudflare account. The development bundle pins JSON below 3 because current tested Rails versions require its positional-options API.
-
-See the [verification report](docs/verification/2026-09-10.md) for evidence, the historical dogfood inventory, Rebulk integration findings, and remaining live-provider checks.
-
-A subsequent [live verification pass](docs/verification/2026-09-10-live.md) exercised isolated sending, deployed ingress, binary attachments, reply threading, real LLM processing, and delivery-event redelivery/acknowledgement under `test.rebulk.com`. The [follow-up report](docs/verification/2026-09-10-followup.md) covers authenticated recipient routing and draft-review improvements after that run. Temporary cloud resources were removed afterward. No DNS changes or RubyGems publication occurred. These dated reports do not constitute live verification of later changes.
-
-MIT license.
+Acceptance is the start of delivery. Use [delivery events](docs/delivery-events.md)
+to track delivered messages, bounces, and complaints.
+See the [Ruby API reference](docs/reference.md) for attachments, raw MIME, and configuration.
+
+## Guides
+
+| Task | Guide |
+| --- | --- |
+| Set up sending, receiving, and tracking | [Rails quickstart](docs/getting-started.md) |
+| Explore the available features | [Feature list](docs/features.md) |
+| Create inboxes and aliases | [Mailboxes](docs/mailboxes.md) |
+| Add mailbox administration | [Management UI](docs/management-engine.md) |
+| Configure addresses and customer subdomains | [Cloudflare domain setup](templates/worker/docs/domain-setup.md) |
+| Save outgoing messages and safely retry jobs | [Outbox](docs/outbox.md) |
+| Track delivery and bounces | [Delivery events](docs/delivery-events.md) |
+| Use separate SQLite databases | [Database tenancy](docs/activerecord-tenanted.md) |
+| Connect a custom receiving endpoint | [Custom ingress](docs/custom-ingress.md) |
+| Diagnose missing mail | [Troubleshooting](docs/troubleshooting.md) |
+| Configure the client and command-line tasks | [Reference](docs/reference.md) |
+
+[Security](SECURITY.md) · [Contributing](CONTRIBUTING.md) · [MIT license](LICENSE.txt)

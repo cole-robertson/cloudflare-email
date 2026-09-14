@@ -7,7 +7,7 @@ gem.
 ## Deploy
 
 Choose a single receiving domain or dynamic organization subdomains using the
-[domain setup worksheet and cited examples](docs/domain-setup.md). Once your
+[domain setup guide](docs/domain-setup.md). Once your
 receiving namespace is verified, new mailboxes can be created in Rails without
 editing a Worker recipient list. `npm run check:subdomains -- --base in.example.com`
 checks public MX for fresh names; it does not claim live delivery verification.
@@ -66,7 +66,7 @@ For each inbound message, the Worker:
    pass. Even exhausted queue retries leave the original message recoverable.
 
 The signed request uses HMAC-SHA256 and authenticates the original SMTP envelope
-alongside the MIME bytes. See [durable delivery setup and recovery](./docs/durable-inbound.md).
+alongside the MIME bytes. See [durable delivery setup and recovery](docs/durable-inbound.md).
 `INBOUND_DELIVERY_MODE=direct` selects an explicit single-attempt fallback that
 calls `message.setReject` on non-2xx, timeout or network failure. Existing pending
 mail keeps draining through Queue and cron while this fallback is selected.
@@ -76,8 +76,7 @@ timestamps outside its 5-minute acceptance window. A signature authenticates the
 Worker request, not the original email sender. Captured requests remain valid
 inside that window; Rails deduplicates messages through Action Mailbox.
 
-Deploy the Rails gem and this Worker together with ingress paused during the
-transition. Rails accepts v2 and v3 signatures and rejects v1/missing versions. It stores authenticated
+Rails accepts v2 and v3 signatures and rejects v1/missing versions. It stores authenticated
 SMTP metadata separately from MIME; applications read it using
 `Cloudflare::Email::Envelope.for(inbound_email)`. Duplicate detection includes the
 exact SMTP recipient, preserving separate To/Cc/Bcc deliveries. The format accepts
@@ -144,8 +143,7 @@ encoded as unpadded base64url, limited to 16,384 encoded characters, and sent as
 HMAC-SHA256(secret, "v3.{timestamp}.{encoded_envelope}.{encoded_metadata}.{raw_body}")
 ```
 
-Neither the MIME nor its headers are rewritten. Upgrade Rails to a version that
-supports v3 before enabling metadata in a custom Worker. Keep sensitive provider
+Neither the MIME nor its headers are rewritten. Keep sensitive provider
 data out of metadata unless your application's retention and access policies
 permit storing it with email records.
 
@@ -240,10 +238,10 @@ after delivery and does not replace this optional outage archive.
 
 ## Durable inbound delivery
 
-[Durable inbound delivery](./docs/durable-inbound.md) is the default. Provision the
+[Durable inbound delivery](docs/durable-inbound.md) is the default. Provision the
 configured private R2 bucket, Queue producer/consumer and cron before deploying.
 There is no rollout enable flag or automatic downgrade when bindings are missing.
-The guide covers upgrades, monitoring, recovery tests and explicit direct fallback.
+The guide covers monitoring, recovery tests, and direct fallback.
 
 ## Validate changes
 

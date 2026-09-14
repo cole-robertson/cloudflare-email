@@ -7,21 +7,13 @@ and access control. SQLite works out of the box; database tenancy is opt-in.
 Rails already stores raw email, parses it, routes it to handlers, and runs
 processing jobs. Mailbox Kit adds the inbox your users interact with.
 
-## Choose your setup
+## Install
 
-- **Cloudflare receiving or sending:** follow the [Cloudflare Rails guide](https://github.com/cole-robertson/cloudflare-email/blob/main/docs/getting-started.md).
-  It includes this core; use the Cloudflare installer.
-- **An existing Action Mailbox integration:** install this core and attach received
-  email to inboxes. Follow the example below.
-- **Only processing incoming email:** Action Mailbox alone may be enough.
-
-Add Mailbox Kit 0.1 to your Gemfile:
+For a Rails app using another inbound provider:
 
 ```ruby
 gem "mailbox-kit", "~> 0.1.0"
 ```
-
-For a new Rails 7.2–8.1 application:
 
 ```sh
 bundle install
@@ -30,8 +22,10 @@ bin/rails generate mailbox_kit:install
 bin/rails db:migrate
 ```
 
-Already using Cloudflare mailboxes? Follow the [upgrade guide](docs/upgrading.md)
-instead of creating the tables again.
+Skip `action_mailbox:install` if Action Mailbox is already configured.
+
+For Cloudflare, use the [Cloudflare mailbox guide](https://github.com/cole-robertson/cloudflare-email/blob/main/docs/mailboxes.md)
+instead. Cloudflare Email installs Mailbox Kit automatically.
 
 ## Create an inbox in code
 
@@ -81,34 +75,11 @@ The optional management engine provides a server-rendered UI with no frontend
 build. Your application supplies authentication and authorizes each action;
 access is denied until configured. See [management setup](docs/integration.md#management-interface).
 
-## The split
+## More features
 
-Mailbox Kit works without Cloudflare. Cloudflare Email depends on this core and
-installs it automatically; applications using both APIs may list both gems in
-their Gemfile to make their direct dependencies explicit. Either declaration
-installs the same packages. Inboxes, database tenancy, and the management UI still
-require explicit setup. Installing the gem does not enable them.
+Use the [integration guide](docs/integration.md) for aliases, catch-all addresses,
+retention, authentication, and separate tenant databases.
 
-The core has no runtime gem dependencies and does not load Rails or Active Record
-for plain Ruby consumers. Rails applications supply their framework dependencies;
-the core registers Rails integration hooks when Rails is present.
-
-| Layer | Owns |
-| --- | --- |
-| Rails | Raw MIME, Active Storage, parsing, routing, processing jobs/status, cleanup policy, Action Mailer |
-| Mailbox Kit | Inbox identities, addresses/aliases, memberships, read/archive state, selective retention, optional tenant context, management UI |
-| Cloudflare | Request verification, authoritative envelope metadata, Worker retries/storage, sending, delivery feedback, provisioning |
-| Your app | Users/organizations/sites, ownership lifecycle, authorization, sender acceptance, business effects |
-
-Inbound and outbound can use different providers through Rails. The core does
-not send email or supply a universal outbound adapter registry. `owner_ref` is an
-application-managed reference; it is not an automatic `has_mailbox` association
-or permission grant.
-
-Inbox-associated messages survive Rails' automatic incineration. For retaining
-all inbound messages, Rails already offers `config.action_mailbox.incinerate = false`.
-Raw storage and processing remain Rails responsibilities.
-
-See the [integration guide](docs/integration.md) for aliases, catch-all addresses,
-verified source ingestion, duplicates, retention, authorization and optional
-database tenancy. See [upgrading](docs/upgrading.md) for existing installations.
+Your app supplies users, organizations, sender policy, and mailbox permissions.
+`owner_ref` stores your reference to an application record; it does not grant access.
+Inbound and outbound email can use different providers through Rails.

@@ -1,138 +1,64 @@
-# What cloudflare-email does
+# Features
 
-cloudflare-email connects your Ruby or Rails application to Cloudflare's email
-services. You can use just the sending client, add incoming mail, or build a
-mailbox on top of the optional database-backed delivery tools.
+Cloudflare Email handles sending, receiving, and delivery tracking. Mailbox Kit
+adds persistent inboxes and a management UI. Start with the
+[Rails quickstart](getting-started.md).
 
-Start with [Getting started](getting-started.md) for working examples. These
-features are available in **0.4.0**, which includes **Mailbox Kit 0.1.0**. Database multi-tenancy is **off by default**:
-the optional mailbox module works in one database unless you explicitly configure
-a tenant connection adapter. A mailbox tenant key alone does not switch databases.
+## Sending
 
-## Choose the pieces you need
+- Use existing Action Mailer templates or the plain Ruby client.
+- Send text, HTML, attachments, multipart messages, cc/bcc, and replies.
+- Save outgoing messages in a [durable outbox](outbox.md) with a history of attempts and recipient outcomes.
+- Retry jobs using the saved send operation; uncertain sends stay available for review.
+- Track delivered, deferred, bounced, failed, rejected, and complained messages through [delivery events](delivery-events.md).
+- [Match replies](thread-correlation.md) using Cloudflare's returned message ID.
 
-| You want to… | Use | What you get |
-| --- | --- | --- |
-| Create managed inboxes in code | Optional `Mailboxes` module | Named mailboxes, aliases, ownership references, read/archive state and retained raw mail |
-| Isolate organizations in separate databases | Optional `Tenancy` adapter | Configurable ActiveRecord base, tenant-aware jobs and shared-to-tenant event replay; tested with SQLite and `activerecord-tenanted` |
-| Send from an ordinary Ruby program | `Cloudflare::Email::Client` | Structured messages or complete raw MIME; no Rails/database required |
-| Send existing Rails mailers | ActionMailer delivery method | Your mailer templates, attachments, multipart bodies, cc/bcc and reply headers sent through Cloudflare |
-| Receive email in Rails | Email Worker + ActionMailbox | Unchanged raw MIME, attachments, authenticated SMTP envelope metadata and duplicate handling |
-| Develop against real incoming email locally | `cloudflare:email:dev` | A temporary tunnel restricted to your email ingress |
-| Save an email before sending it | Optional ActiveRecord outbox | Immutable message snapshot, saved recipients, a send claim, and per-recipient results |
-| Avoid accidentally resending after a crash or timeout | `SendJob` + outbox | Jobs use the saved operation identity; uncertain attempts stay blocked for review |
-| Track delivery, bounce or complaint updates | `EventConsumer` + Cloudflare Queue | Validated lifecycle events, account/domain checks and acknowledgement after successful handling |
-| Avoid building your own event ledger | Optional tracking tables | Durable receipts, duplicate/conflict detection, unmatched-event storage and replay |
-| Connect events to outbox recipients | `DeliveryEvents` | Account/message/recipient matching, event ordering and callbacks for your app's records |
-| Investigate an uncertain send | Recovery tasks + `Outbox.reconcile` | Operator-supplied evidence and an audit trail; no automatic resend based on elapsed time |
-| Match replies to earlier messages | Provider message IDs + `MessageId.normalize` | A consistent lookup key for your app's conversations |
-| Observe email processing | ActiveSupport notifications + `doctor` | Send/ingress/event/outbox instrumentation and configuration diagnostics |
-| Deploy receiving infrastructure | Ruby deployer and routing tasks | Environment-specific Workers, ingress secrets, address routes and DNS preflight checks |
+## Receiving
 
-## Integration tools
+- Deploy the included [Cloudflare Worker](../templates/deploy-to-cloudflare/README.md).
+- Retain incoming mail in R2 and retry while Rails is unavailable.
+- Verify signed requests and the actual SMTP recipient before storing email.
+- Keep original messages and attachments in Rails Action Mailbox.
+- Deduplicate repeated deliveries.
+- Process email with ordinary Rails mailbox handlers.
+- Test incoming email locally with `bin/rails cloudflare:email:dev`.
 
-[Durable inbound delivery](../templates/worker/README.md#durable-inbound-delivery)
-saves raw email and its envelope in R2 before the Worker returns successfully.
-Queues attempt the Rails handoff, and a scheduled pass recovers retained mail
-after enqueue failures or retry exhaustion. Provision the storage, queue and
-schedule before deploying; direct forwarding requires an explicit fallback setting.
+## Inboxes
 
-[Routing delivery confirmation](routing-deliveries.md) adds a read-only provider
-client and optional durable receipts for qualifying single-recipient deliveries
-that appear in Routing analytics. It does not infer outcomes from missing events
-or change whether an accepted email may be sent again.
+- Create named [mailboxes](mailboxes.md), aliases, and optional catch-all addresses.
+- Associate mailboxes with application records through `owner_ref`.
+- List unread messages, mark them read, archive them, and retain their originals.
+- Suspend mailboxes while reserving their addresses.
+- Send from an active mailbox through the outbox.
+- Mount a [server-rendered management UI](management-engine.md) using your app's login and permissions.
+- Use [customer subdomains](../templates/worker/docs/domain-setup.md) with Rails address lookup.
 
-Existing ingestion pipelines can use [custom ingress](custom-ingress.md) to
-verify bounded raw messages before tenant lookup, keep their own storage, or
-persist through ActionMailbox. Optional v3 signatures authenticate custom Worker
-metadata; your application still decides whether its provenance and sender policy
-are acceptable. The bundled Worker continues to use v2 by default.
+## Storage and providers
 
-`Mailboxes.receive` yields the resolved destination while retaining email and
-membership persistence, so your own processing record can link to the saved mail.
-`Mailboxes.with_recipient` offers the same destination context for applications
-that own their storage. Neither replaces your sender policy or business workflow.
+SQLite and PostgreSQL are supported. Database multi-tenancy is **off by default**;
+you can configure [separate SQLite databases](activerecord-tenanted.md) when needed.
 
-[Read-only routing diagnostics](routing-diagnostics.md) inspect exact-domain DNS
-and the selected Worker route. They distinguish missing configuration from an
-incomplete inspection; a passing snapshot does not prove live email delivery.
+[Mailbox Kit](../mailbox-kit/README.md) works with other Action Mailbox integrations.
+Incoming and outgoing mail can use different providers.
 
-## SQLite works
+## Administration
 
-The optional receipt and outbox tables work with **SQLite**. Keep your existing
-Rails SQLite database; PostgreSQL is optional, and both adapters have concurrency
-coverage. The gem uses ActiveRecord and does not install a separate database
-service. You still choose a durable Rails job backend and run its workers.
+Use [configuration checks and tasks](reference.md#observability-and-permissions),
+[routing diagnostics](routing-diagnostics.md), and ActiveSupport notifications to
+monitor your integration. Custom endpoints can reuse the [ingress verification API](custom-ingress.md).
+[Routing analytics](routing-deliveries.md) can supply additional delivery evidence
+for qualifying messages to verified Routing destinations.
 
-Database locking conflicts can require a job retry. A retry uses the existing
-outbox identity; it does not clear an uncertain send claim. Keep application
-writes and gem callbacks on the same database connection when they must commit
-together. See [outbox setup](outbox.md).
+## What the statuses mean
 
-## Understand the different kinds of success
-
-| Result | What it tells you |
+| Status | Meaning |
 | --- | --- |
-| Successful API request | Cloudflare returned a successful response; inspect recipient outcomes too |
-| `response.accepted?` | There is evidence of acceptance for at least part of the send |
-| Outbox `accepted` | Every recipient has acceptance evidence |
-| Outbox `partial` | Some recipients have acceptance evidence; the others need individual attention |
-| Delivery event `delivered` | The recipient's server accepted the email; this is not a read receipt |
-| Ingress HTTP 200 | Rails stored the message or recognized a duplicate; mailbox processing happens separately |
+| Send accepted | Cloudflare accepted the send; delivery updates may follow |
+| Outbox `partial` | Recipients have different acceptance outcomes; inspect each recipient |
+| Delivery event `delivered` | The receiving mail server accepted the message |
+| Inbound Rails `delivered` | Your mailbox handler finished processing |
+| Inbox read / archived | Your application's inbox state |
 
-Sending, receiving and delivery tracking are separate Cloudflare setups. A
-working sending domain does not automatically enable incoming routes or queue
-subscriptions. The [getting-started guide](getting-started.md) walks through each.
-
-## Protections included
-
-By default, incoming requests use v2 HMAC signatures covering the timestamp, SMTP sender,
-SMTP recipient and raw message. Rails checks a five-minute timestamp window.
-Identical MIME retried for the same recipient is deduplicated; delivery to a
-different recipient is stored separately.
-
-Rails and the Worker default to a **25 MiB raw incoming message limit**. Both
-support a positive `MAX_EMAIL_BYTES` override. Remote endpoints require HTTPS,
-the Worker refuses redirects and limits its Rails request to 15 seconds, and
-the development tunnel only routes ingress POSTs. Client inspection and default
-retry/mailbox logging omit sensitive details.
-
-The outbox preserves the rendered message and acceptance evidence, blocks
-ambiguous resend attempts, and records reconciliation decisions. Delivery-event
-validation rejects malformed schema fields; original receipt identity and
-payload are read-only through normal ActiveRecord updates. These safeguards do
-not make database administrators untrusted or provide exactly-once delivery.
-
-See [managed mailbox setup](mailboxes.md) for the application-facing API and
-[activerecord-tenanted](activerecord-tenanted.md) for separate SQLite databases.
-
-## What belongs in your mailbox application
-
-The gem supplies email infrastructure and optional managed mailbox records.
-Your app supplies users, mailbox permissions, conversation records, custom folders, search, compose screens,
-drafts and any AI review or approval workflow. It also decides unsubscribe and
-recipient eligibility policy. The optional [management engine](management-engine.md)
-adds server-rendered mailbox administration and plain-text message previews.
-It does not supply a compose/conversation product or AI agent.
-
-An authenticated SMTP envelope tells your app which address Cloudflare received
-the message for. It does not prove the human sender's identity. Reply correlation
-also does not authorize access to a conversation. Apply your app's permissions
-before displaying mail or sending a reply.
-
-You configure Cloudflare domains/DNS, queue subscriptions, durable jobs,
-monitoring, storage protection and retention. Direct forwarding does not buffer
-Rails outages; the optional durable inbound setup retains pending mail in R2.
-See [architecture](architecture.md)
-for the full boundary and [security guidance](../SECURITY.md) for deployment.
-
-## Where to go next
-
-- [Build your first integration](getting-started.md)
-- [Use plain Ruby, attachments or raw MIME](../README.md#plain-ruby)
-- [Configure client retries and errors](../README.md#retry-and-configuration)
-- [Set up event polling and durable receipts](delivery-events.md)
-- [Recover saved outbound operations](outbox.md)
-- [Correlate replies](thread-correlation.md)
-- [Use Cloudflare SMTP instead of the HTTP delivery method](../README.md#smtp-alternative)
-- [Troubleshoot your setup](troubleshooting.md)
+Your app supplies users, permissions, sender acceptance rules, and business
+processing. The management UI covers administration and message reading; compose
+screens, conversations, search, and AI workflows belong in your app.

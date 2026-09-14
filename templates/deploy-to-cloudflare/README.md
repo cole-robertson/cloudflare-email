@@ -3,13 +3,13 @@
 Receive email in Rails with the [cloudflare-email gem](https://github.com/cole-robertson/cloudflare-email).
 This template stores inbound mail in private R2, delivers it through a Queue,
 and retries from storage when Rails is unavailable. It includes scheduled
-recovery and Worker logs. No React app or extra server is needed.
+recovery and Worker logs.
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/cole-robertson/cloudflare-email/tree/main/templates/deploy-to-cloudflare)
 
 ## 1. Prepare Rails
 
-Install `gem "cloudflare-email", "~> 0.3.0"` and follow the
+Install `gem "cloudflare-email", "~> 0.4.0"` and follow the
 [Rails setup guide](https://github.com/cole-robertson/cloudflare-email/blob/main/docs/getting-started.md).
 Deploy Rails with Action Mailbox storage and routing configured before connecting
 real email. Generate a secret with `openssl rand -hex 32` and configure it as
@@ -40,8 +40,8 @@ cron are present. Keep the bucket private with no lifecycle rule expiring
 
 **Choose your address shape:** `acme@in.example.com` on one receiving domain,
 or `invoices@acme.in.example.com` with dynamic organization subdomains.
-Use the [shared domain setup guide](docs/domain-setup.md) for the setup worksheet,
-Cloudflare DNS/routing steps, cited Rebulk example, and verification commands.
+Use the [shared domain setup guide](docs/domain-setup.md) for DNS,
+Worker routing, and verification commands.
 The same Worker serves both; there is no per-organization Worker allowlist.
 
 In Cloudflare, enable Email Routing for the intended receiving domain/subdomain
@@ -56,8 +56,7 @@ If using the gem's managed mailboxes, register the receiving mailbox/address in
 Rails too. Tenant support and domain catch-all receiving remain explicit choices.
 After verifying a dynamic namespace as described in the guide, register new
 organization domains in Rails without routinely adding provider rules per org.
-Wildcard DNS behavior must be verified on your Cloudflare account; the guide
-distinguishes working Rebulk evidence from Cloudflare's explicit onboarding docs.
+Verify wildcard receiving on your account before relying on unlisted subdomains.
 Outbound Email Sending credentials and delivery-event subscriptions are separate
 from this inbound Worker setup.
 
@@ -87,10 +86,9 @@ also tolerate retries. Configure operational alerts in your monitoring service.
 
 ## Updates and local development
 
-Your copied repository belongs to you; gem updates do not update its Worker
-automatically. Review upstream release notes, deploy Rails first, then port Worker
-changes into your copy while preserving your resource names, secrets, and pending
-storage. Keep production resources separate from test resources.
+Your copied repository contains your Worker deployment. Deploy changes from that
+repository; updating the gem does not deploy the Worker. Preserve resource names,
+secrets, and pending storage.
 
 Use Node 22.12+ (or a supported newer version): `npm ci`, `npm test`, and
 `npm run check`. For local development, copy `.dev.vars.example` to `.dev.vars`,

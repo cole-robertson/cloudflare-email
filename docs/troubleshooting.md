@@ -9,7 +9,7 @@ into public logs or issues.
 
 | What you see | What to check next |
 | --- | --- |
-| New generator or API is missing | Check `Gemfile.lock`. Use cloudflare-email 0.4.x with mailbox-kit 0.1.x; follow the [installation guide](getting-started.md#install-the-current-code). |
+| New generator or API is missing | Check `Gemfile.lock`. Use cloudflare-email 0.4.x with mailbox-kit 0.1.x; follow the [installation guide](getting-started.md#1-install). |
 | Credentials appear to be ignored | Nonempty Rails credentials override environment variables. Check the Rails environment and restart the app after changes. |
 | Authentication or domain error | Run `bin/rails cloudflare:email:doctor`; check account ID, token permissions and sending-domain verification. |
 | `doctor` reports limited read access | A send token may lack diagnostic read permissions. Review the specific result; diagnostics alone cannot prove whether sending works. |
@@ -30,7 +30,7 @@ FROM=hello@mail.example.com TO=you@example.net bin/rails cloudflare:email:send_t
 | --- | --- |
 | Address receives nothing | Verify receiving-subdomain onboarding and the address route's Worker. Sending-domain verification is separate. |
 | Route provisioning refuses a subdomain | Complete Email Routing subdomain setup and DNS preflight first. Do not enable or replace apex routing just to bypass the error. |
-| Worker reports 401 from Rails | Check matching ingress secrets and compatible signature versions. The Worker defaults to v2. The opt-in v3 [custom-ingress API](custom-ingress.md) requires upgrading Rails before enabling Worker metadata. |
+| Worker reports 401 from Rails | Check matching ingress secrets and compatible signature versions. The Worker defaults to v2. Use the [custom-ingress API](custom-ingress.md) for v3 Worker metadata. |
 | Worker reports 408 | Check clock accuracy and the five-minute signing window. |
 | Worker reports 413 or rejects size | Raw MIME exceeds the configured limit. Match `MAX_EMAIL_BYTES` on Rails and Worker and check upstream request limits. |
 | Worker reports 3xx | Point it directly at the final HTTPS ingress URL; redirects are intentionally rejected. |
@@ -42,7 +42,7 @@ FROM=hello@mail.example.com TO=you@example.net bin/rails cloudflare:email:send_t
 
 ## Local development
 
-Restart Rails after upgrading so the ingress-only guard is installed. Start
+Restart Rails after configuring the gem so the ingress-only guard is installed. Start
 Rails on the expected port before `cloudflare:email:dev`, install `cloudflared`,
 and use development credentials and a development receiving route.
 
@@ -99,6 +99,6 @@ bin/rails cloudflare:email:replay_events
 ```
 
 See [delivery events](delivery-events.md) for queue setup and
-[observability](../README.md#observability-and-permissions) for notifications you
+[observability](reference.md#observability-and-permissions) for notifications you
 can connect to your monitoring. A delivery notification wraps handler execution;
 it is not proof that queue acknowledgement completed.

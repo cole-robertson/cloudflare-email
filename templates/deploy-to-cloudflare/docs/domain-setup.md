@@ -1,198 +1,118 @@
-# Set up once, create mailboxes in Rails
+# Set up addresses and customer subdomains
 
-Use the same Worker for either address shape:
+Choose the address pattern for your app:
 
-| Pattern | Example | What changes when a customer joins |
+| Pattern | Example | Rails setup |
 | --- | --- | --- |
-| One receiving domain | `acme@in.example.com` | Create a mailbox/address in Rails |
-| Organization subdomains | `invoices@acme.in.example.com` | Register the exact organization domain and its mailboxes in Rails, within your verified receiving namespace |
+| One receiving domain | `acme@in.example.com` | Register the domain once; create a mailbox for each customer |
+| Customer subdomains | `invoices@acme.in.example.com` | Register each exact customer domain and its mailboxes |
 
-Neither pattern needs a recipient allowlist in the Worker. Rails owns accepted
-addresses and organization membership. Database multi-tenancy remains optional.
-The [Rails hello-world template](https://github.com/cole-robertson/cloudflare-email-rails-starter)
-demonstrates the first pattern with a normal SQLite database and generated login.
+One Worker can serve all your accepted addresses. Rails looks up the mailbox;
+you do not need to maintain an address list in the Worker.
+Database multi-tenancy is optional.
 
-## What is verified, and what Cloudflare documents
-
-**Rebulk's existing deployment uses the second pattern:**
-`<site>@<organization>.rebulk.com`, wildcard MX, a catch-all Worker rule, and Rails
-organization/mailbox lookup. New organizations do not need a Worker enrollment
-list or a routine per-organization Cloudflare approval. Its September 2026
-rehearsal checked exact-domain public MX answers and archived SMTP-envelope
-delivery evidence, alongside the global catch-all rule. The apex keeps its
-separate mail provider. Sources (Rebulk repository access required):
-
-- [Worker architecture and organization setup](https://github.com/Rebulk/rebulk-system/blob/1cc26e0076ba0e9157e89f5879604df8c94430bc/cloudflare/README.md).
-- [Wildcard MX observations and limits of zone-level API evidence](https://github.com/Rebulk/rebulk-system/blob/1cc26e0076ba0e9157e89f5879604df8c94430bc/docs/cloudflare-mailbox-onboarding-rehearsal-2026-09-12.md).
-
-This is deployment evidence, not a Cloudflare-wide service guarantee. Cloudflare's
-[subdomain onboarding guide](https://developers.cloudflare.com/email-service/configuration/subdomains/)
-describes adding subdomains explicitly and currently lists a 30-domain combined
-Routing/Sending limit. It does not document arbitrary wildcard Email Routing as
-a way to bypass that limit. Cloudflare separately documents
-[wildcard DNS and exact-record precedence](https://developers.cloudflare.com/dns/manage-dns-records/reference/wildcard-dns-records/).
-Working wildcard DNS alone does not establish Email Routing acceptance. If your
-account does not accept unlisted subdomains, use documented explicit onboarding
-within its limits, or the single-domain pattern. Do not assume that an existing
-Rebulk setup proves a fresh account's behavior.
-
-A fresh [public DNS observation](https://github.com/cole-robertson/cloudflare-email/blob/main/docs/verification/2026-09-13-wildcard-dns.json)
-also records Cloudflare MX answers for `test.rebulk.com` and two random subdomains
-without creating DNS records or adding those labels in Cloudflare. That report
-is public and deliberately marks `delivery_verified: false`; no email was sent
-by this DNS-only check.
-
-## 1. Fill in your setup worksheet
-
-Use a dedicated receiving namespace when the apex already serves Workspace or
-Microsoft 365. Example values:
-
-| Setting | Your example value |
-| --- | --- |
-| Cloudflare zone | `example.com` |
-| Receiving base | `in.example.com` |
-| Organization domain | `acme.in.example.com` |
-| Worker | `cloudflare-email-ingress` |
-| Rails ingress URL | `https://app.example.com/rails/action_mailbox/cloudflare/inbound_emails` |
-| Shared ingress secret | Generate with `openssl rand -hex 32`; save privately in Rails and the Worker |
-
-Keep staging and production Workers, buckets, queues, secrets, and receiving
-namespaces separate. The standalone deploy-button template takes one environment
-per copy; the regular CLI template uses `--env production` or another explicit env.
-
-## 2. Deploy the shared infrastructure
+## 1. Deploy the Worker
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/cole-robertson/cloudflare-email/tree/main/templates/deploy-to-cloudflare)
 
-Deploy Rails with gem 0.3+ first. The button copies the standalone Worker and
-prompts for `RAILS_INGRESS_URL` and `INGRESS_SECRET`. Its configuration includes
-private R2 storage, a Queue producer/consumer, once-per-minute recovery, and logs.
-Cloudflare documents [automatic R2/Queue provisioning and secret prompts](https://developers.cloudflare.com/workers/platform/deploy-buttons/).
-The button does not create email DNS, claim a domain, or register Rails mailboxes.
+Deploy Rails first, then enter its HTTPS ingress URL and shared secret in the
+Worker deployment form. Cloudflare provisions private R2 storage and a Queue.
+Use separate deployments for development and production.
 
-## 3. Connect DNS and the Worker once
+The [setup guide](https://github.com/cole-robertson/cloudflare-email/tree/main/templates/deploy-to-cloudflare)
+covers the form and required resources.
 
-For **one domain**, follow Cloudflare's documented
-[Email Routing onboarding](https://developers.cloudflare.com/email-service/get-started/route-emails/)
-and configure its [catch-all action](https://developers.cloudflare.com/email-service/configuration/email-routing-addresses/#catch-all-rule)
-as **Send to a Worker**, selecting your deployed Worker. This avoids one provider
-rule per local part. Review the actual zone/domain scope and any explicit rules
-that take precedence before saving.
+## 2. Connect your receiving domain
 
-For a **Rebulk-style dynamic namespace**, first establish receiving on your account
-and retain the exact MX targets/priorities assigned by Cloudflare. Then, when
-reproducing and verifying wildcard receiving, the DNS template is:
+Use a subdomain such as `in.example.com` if your main domain already receives
+mail through Google Workspace or Microsoft 365.
 
-| DNS type | Name in zone `example.com` | Value |
+In Cloudflare Email Routing:
+
+1. [Add the receiving domain or subdomain](https://developers.cloudflare.com/email-service/configuration/subdomains/).
+2. Add the DNS records Cloudflare provides, preserving your main domain's mail records.
+3. Create a route with **Send to a Worker** and select your deployed Worker.
+4. To accept many local parts, configure the receiving domain's
+   [catch-all rule](https://developers.cloudflare.com/email-service/configuration/email-routing-addresses/#catch-all-rule)
+   to use that Worker.
+
+A Cloudflare catch-all gets email to your Worker. Rails still decides which
+addresses are accepted. To put unknown local parts into an inbox, also enable
+the gem's [mailbox catch-all](https://github.com/cole-robertson/cloudflare-email/blob/main/docs/mailboxes.md#receive-unregistered-local-parts-with-an-optional-catch-all).
+
+## 3. Customer subdomains
+
+Cloudflare documents explicit subdomain onboarding. If you want new customer
+subdomains to work without adding each one in Cloudflare, verify wildcard
+receiving on your account before relying on it.
+
+For a receiving namespace under `in.example.com`, the DNS pattern is:
+
+| Type | Name in zone `example.com` | Value |
 | --- | --- | --- |
-| MX | `*.in` | Each Cloudflare-assigned receiving MX target, with its assigned priority |
+| MX | `*.in` | Each receiving MX target and priority assigned by Cloudflare |
 
-Create one record per assigned target. Do not invent MX targets, point MX at a
-Worker URL, or replace the apex's existing MX records. Complete the service's
-other required DNS records through its onboarding instructions; do not blindly
-duplicate SPF records. Inspect the account's catch-all **Send to a Worker** rule
-and verify that it actually handles your intended namespace. A Cloudflare Worker
-HTTP route such as `*.example.com/*` is unrelated to email routing.
+Wildcard DNS alone does not guarantee Email Routing accepts an unlisted
+subdomain. Test with a fresh customer subdomain and confirm email reaches the
+Worker and the correct Rails inbox. If your account requires explicit onboarding,
+add those subdomains in Cloudflare or use the single-domain pattern.
 
-An explicit DNS name can stop wildcard inheritance **even if its record is TXT
-or A rather than MX**. For example, an existing `acme.in.example.com` record may
-require its own receiving MX records. Test exact customer names as well as fresh
-ones. A wildcard also does not supply MX for the receiving base itself.
+[Explicit DNS records override wildcard inheritance](https://developers.cloudflare.com/dns/manage-dns-records/reference/wildcard-dns-records/),
+including names with A or TXT records. Check existing customer names as well as
+new ones. The receiving base `in.example.com` needs its own records.
 
-## 4. Check without modifying infrastructure
+### Check DNS
 
-From either current Worker template, run:
+From either Worker template:
 
 ```sh
 npm run check:subdomains -- --base in.example.com --labels acme,globex
 ```
 
-This requires only Node and DNS access, not a Cloudflare API key. It resolves MX
-for your chosen labels plus two fresh random labels. DNS lookups have bounded
-timeouts. JSON output distinguishes observed Cloudflare MX, other/missing MX, and
-lookup uncertainty. Exit zero means only that all queried names resolved to
-Cloudflare MX; `delivery_verified` remains false. Compare returned targets with
-your account's assigned targets. Existing explicit records can explain differences.
-The command ships in the repository templates; gem 0.3.0's already-published
-template predates it, so refresh your template copy to use it.
+This checks your chosen labels and two fresh labels without changing DNS.
+It needs Node and DNS access, with no API key. A passing result confirms MX
+answers; send a real email to verify delivery.
 
-For provider rule inspection, the gem also offers:
+For configured Worker rules, use the
+[Rails routing diagnostic](https://github.com/cole-robertson/cloudflare-email/blob/main/docs/routing-diagnostics.md).
+That check inspects exact DNS records, so inherited wildcard MX may appear missing.
 
-```sh
-bin/rails cloudflare:email:check_route \
-  ADDRESS=invoices@acme.in.example.com \
-  WORKER_NAME=cloudflare-email-ingress \
-  ACCOUNT_ID=your-cloudflare-account-id
-```
+## 4. Create the mailbox in Rails
 
-See [diagnostic credentials and limits](https://github.com/cole-robertson/cloudflare-email/blob/main/docs/routing-diagnostics.md).
-That diagnostic inspects exact-domain configured records; it does not resolve
-wildcard DNS inheritance. A working inherited-MX setup can therefore report
-missing exact records. Keep public DNS, provider rule inspection, and actual
-delivery evidence separate; do not force every organization through Cloudflare
-onboarding merely to make that diagnostic green.
-
-## 5. Prove the dynamic path before adopting it
-
-Use two new organization labels that have not been added individually in the
-Cloudflare dashboard:
-
-1. Check their public MX answers with the command above.
-2. Through trusted provisioning code, register both **exact** domains in Rails,
-   each against the correct stable organization key. Create a test mailbox for
-   each. Record your independently checked configuration evidence and activate
-   those test addresses so the gem can receive the verification messages.
-3. Send real email to both addresses from an external mailbox. Confirm the
-   Worker receives each, Rails retains the original message, and each appears
-   only in the correct organization's inbox. Record the message IDs and result.
-4. Repeat with a newly generated label without changing Cloudflare. If delivery
-   fails before the Worker, resolve the Cloudflare acceptance/onboarding issue;
-   changing Rails cannot fix a provider SMTP rejection.
-5. Rehearse Rails being unavailable, then verify retained R2 mail drains after
-   recovery without duplicate app records. Follow the
-   [durable recovery guide](https://github.com/cole-robertson/cloudflare-email/blob/main/templates/worker/docs/durable-inbound.md).
-
-These are deliberate test addresses; no real-email test is sent by the DNS checker.
-Successful tests establish evidence for your receiving namespace, not a guarantee
-that every future DNS change or provider policy will preserve it.
-
-## 6. Create organizations in Rails
-
-Once your namespace policy is verified, use the same gem APIs on organization
-creation. For example, from trusted app code after authorizing the organization:
+After verifying the receiving route, run this from trusted application setup code:
 
 ```ruby
 registry = Cloudflare::Email::Mailboxes
-organization_key = "organization-123" # Trusted stable app identity, not request input.
 domain = registry.register_domain(
   domain: "acme.in.example.com",
-  tenant_key: organization_key,
-  account_id: Cloudflare::Email::Credentials.account_id
+  tenant_key: "organization-123"
 )
-registry.activate_domain!(domain.id, evidence: verified_namespace_evidence)
-registry.for_tenant(organization_key) do |inboxes|
-  mailbox = inboxes.create(name: "Invoices", address: "invoices@acme.in.example.com",
-    owner_ref: "Organization:123")
-  inboxes.activate_address!(inboxes.addresses(mailbox.id).first.id,
-    evidence: verified_namespace_evidence)
+registry.activate_domain!(domain.id, evidence: "Receiving route verified")
+
+registry.for_tenant("organization-123") do |inboxes|
+  mailbox = inboxes.create(
+    name: "Invoices",
+    address: "invoices@acme.in.example.com",
+    owner_ref: "Organization:123"
+  )
+  inboxes.activate_address!(mailbox.addresses.first.id,
+    evidence: "Receiving route verified")
 end
 ```
 
-`verified_namespace_evidence` is your stored operator evidence from the setup and
-delivery checks, not a hard-coded claim of success. Make provisioning idempotent
-in your app, validate/reserve slugs, and resolve organization identity from trusted
-records. The gem stores exact domain registrations; it does not accept a `*`
-domain registration or silently authorize an arbitrary recipient from a web form.
-The management engine must obtain allowed domains from your host adapter. The
-hello-world starter intentionally stays single-domain; this recipe is the next
-step for an organization-aware app.
+Use your application's stable organization identity and validate customer slugs.
+Activation records the verification you performed; it does not configure DNS.
+Registration takes exact domains, not `*` patterns.
 
-A **Cloudflare routing catch-all** gets mail to the Worker. The gem's optional
-**mailbox catch-all** decides whether unknown local parts enter a mailbox. They
-are separate. Without the latter, unknown/suspended recipients return non-2xx and
-remain in durable pending storage until resolved. Monitor that backlog.
+Once wildcard receiving is verified, create new customer domains and mailboxes
+through these same APIs. Send a test message and confirm it appears only in the
+intended inbox. Monitor pending mail so unregistered or suspended destinations
+can be resolved.
 
-Receiving on dynamic domains does not authorize sending from them. Cloudflare
-[Email Sending onboarding](https://developers.cloudflare.com/email-service/configuration/subdomains/#add-a-subdomain-to-email-sending)
-is separate; keep a verified shared sending domain unless you have explicitly
-onboarded the customer sending domain.
+## Sending from customer addresses
+
+Receiving and sending are separate. Cloudflare requires
+[verification of each sending domain](https://developers.cloudflare.com/email-service/configuration/subdomains/#add-a-subdomain-to-email-sending).
+A simple setup uses a shared verified From address and a customer-specific
+Reply-To address. To send through a managed mailbox, follow the
+[mailbox sending setup](https://github.com/cole-robertson/cloudflare-email/blob/main/docs/mailboxes.md#send-from-the-mailbox).

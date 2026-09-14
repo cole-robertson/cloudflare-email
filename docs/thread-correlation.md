@@ -16,10 +16,8 @@ message's ID. Keep unmatched replies available for application handling when an
 ID is missing or unknown. Send acceptance and saving the returned ID are not one
 atomic transaction.
 
-The old `SecureMessageId` helper was removed before the 0.2 release. Cloudflare
-controls Message-ID and our [live test](verification/2026-09-10-live.md) confirmed
-replacement of custom IDs for both raw MIME and ActionMailer sends. The provider's
-returned IDs matched received headers and supported reply correlation.
+Cloudflare controls the outgoing Message-ID. Store the returned provider ID
+instead of relying on a custom ID supplied before sending.
 
 Email headers locate a conversation; they do not authorize access to it. Scope
 lookups by the trusted SMTP recipient obtained through `Envelope.for(inbound)`.
