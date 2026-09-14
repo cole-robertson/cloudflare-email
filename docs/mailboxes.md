@@ -5,7 +5,7 @@ mail into them, track read/archive state, and send through the durable outbox.
 It works in one SQLite database or with a separate database per organization.
 It supplies models and services; your app supplies permissions and the UI.
 
-This module is available since version 0.2.0. Install `gem "cloudflare-email", "~> 0.3.0"` for the latest features.
+This module is available since version 0.2.0. Install `gem "cloudflare-email", "~> 0.4.0"` for the latest features, including the provider-neutral Mailbox Kit core.
 
 **Database multi-tenancy is off by default.** The mailbox generator works with
 one ordinary database. Calling `for_tenant` groups and scopes mailbox records;

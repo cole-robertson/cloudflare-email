@@ -2,7 +2,7 @@
 
 Ruby client for [Cloudflare Email Service](https://developers.cloudflare.com/email-service/), with ActionMailer, authenticated ActionMailbox ingress, a forwarding Worker, and optional durable Rails sending and delivery-event tracking.
 
-Version **0.3.0**. Ruby 3.2+, Rails 7.2–8.1; Ruby 4.0 is tested with Rails 8.1. Supported test floors are Rails 7.2.3.2, 8.0.5.1, and 8.1.3.1. Prefer a maintained Ruby/Rails release for new applications. The plain Ruby client uses Ruby's standard libraries plus the Base64 gem. Node is optional: Worker deployment also works through the included Ruby deployer. See [security guidance](SECURITY.md) for deployment responsibilities.
+Version **0.4.0**, with **Mailbox Kit 0.1.0**. Ruby 3.2+, Rails 7.2–8.1; Ruby 4.0 is tested with Rails 8.1. Supported test floors are Rails 7.2.3.2, 8.0.5.1, and 8.1.3.1. Prefer a maintained Ruby/Rails release for new applications. Rails and database dependencies remain optional for the plain Ruby client. Node is optional: Worker deployment also works through the included Ruby deployer. See [security guidance](SECURITY.md) for deployment responsibilities.
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/cole-robertson/cloudflare-email/tree/main/templates/deploy-to-cloudflare)
 
@@ -10,10 +10,10 @@ Deploy the inbound Worker with guided R2/Queue provisioning and secret setup. [P
 
 ## Start here
 
-**On this development branch:** provider-neutral mailbox functionality lives in
+**Starting in 0.4.0:** provider-neutral mailbox functionality lives in
 the sibling [Mailbox Kit](mailbox-kit/README.md) gem. Existing Cloudflare setup
-continues to work; the core requires no Cloudflare account. This extraction is not
-part of the published 0.3.0 release yet.
+continues to work; the core requires no Cloudflare account. Installing
+`cloudflare-email` also installs `mailbox-kit` 0.1.x.
 Existing mailbox installations should use the [core upgrade guide](mailbox-kit/docs/upgrading.md)
 to add the inbound lookup index without recreating their tables.
 
@@ -38,16 +38,17 @@ to add the inbound lookup index without recreating their tables.
 | [SQLite tenant databases](docs/activerecord-tenanted.md) | Give each organization its own SQLite database with `activerecord-tenanted` |
 | [Durable outbox](docs/outbox.md) | Detailed setup, callbacks, retries, and recovery |
 | [Delivery events](docs/delivery-events.md) | Cloudflare Queue setup and recipient status tracking |
-| [Upgrading to 0.3](docs/upgrading-0.3.md) | Changes needed for an existing installation |
+| [Upgrading to 0.4](mailbox-kit/docs/upgrading.md) | Core extraction and data-preserving migrations for existing mailboxes |
+| [Upgrading from 0.2](docs/upgrading-0.3.md) | Additional changes before deploying the durable Worker |
 
 The sections below are the configuration and API reference.
 
 ## Install and send from Rails
 
-Add version 0.3 to your Gemfile. Existing users should follow the [upgrade guide](docs/upgrading-0.3.md), especially before deploying the durable Worker:
+Add version 0.4 to your Gemfile. Existing mailbox users should follow the [core upgrade guide](mailbox-kit/docs/upgrading.md). When upgrading from 0.2, also follow the [durable Worker upgrade guide](docs/upgrading-0.3.md):
 
 ```ruby
-gem "cloudflare-email", "~> 0.3.0"
+gem "cloudflare-email", "~> 0.4.0"
 ```
 
 ```sh

@@ -18,11 +18,12 @@ not need to be the same domain as your Rails application's web address.
 
 ### Install the current code
 
-Add version 0.3 to your app's `Gemfile`. If upgrading an existing installation, read the
-[upgrade guide](upgrading-0.3.md) before changing an existing Worker deployment:
+Add version 0.4 to your app's `Gemfile`. Existing mailbox installations should read
+the [core upgrade guide](../mailbox-kit/docs/upgrading.md). When upgrading from 0.2,
+also read the [Worker upgrade guide](upgrading-0.3.md):
 
 ```ruby
-gem "cloudflare-email", "~> 0.3.0"
+gem "cloudflare-email", "~> 0.4.0"
 ```
 
 ```sh
