@@ -3,7 +3,7 @@ class CreateCloudflareEmailReceivingDomains < ActiveRecord::Migration[7.1]
     create_table :cloudflare_email_receiving_domains do |t|
       t.string :domain, null: false
       t.string :tenant_key, null: false
-      t.string :account_id, null: false
+      t.string :account_id # Required by the sending adapter only.
       t.string :state, null: false, default: "pending"
       t.boolean :sending_enabled, null: false, default: false
       t.text :provisioning_evidence
