@@ -6,7 +6,15 @@
   than an unknown *delivery* outcome. `Client#request` serves every caller, so a
   queue pull that timed out reported that a delivery outcome was unknown when no
   message was in flight — sending operators to look for an email that never
-  existed. Sending callers keep their own delivery-specific wording.
+  existed.
+
+  This message reaches **every** caller of `Client#request`, sending included:
+  nothing wraps or rescues it in `DeliveryMethod` or `Outbox.deliver`, and
+  `SendJob`'s "delivery outcome is unknown; reconcile before retrying" is a
+  separate condition (retrying a delivery already in the `unknown` state), not a
+  wrapper around this error. A send caller now reads "request outcome is unknown",
+  which remains accurate for a send — the request *is* the send — and stops the
+  same string from asserting a delivery on the paths that never had one.
 
 ## 0.4.0 — 2026-09-14
 
