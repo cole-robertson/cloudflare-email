@@ -159,7 +159,7 @@ module Cloudflare
           do_request(method, uri, body)
         rescue *RETRYABLE_NETWORK => e
           unless PRE_SEND_NETWORK.any? { |type| e.is_a?(type) } || @retry_ambiguous
-            raise NetworkError.new("provider response could not be read; delivery outcome is unknown; automatic retry disabled"), cause: nil
+            raise NetworkError.new("provider response could not be read; request outcome is unknown; automatic retry disabled"), cause: nil
           end
           raise NetworkError.new("provider request could not be completed; request outcome is unknown"), cause: nil if attempts > @retries
           log_retry(attempts, e)

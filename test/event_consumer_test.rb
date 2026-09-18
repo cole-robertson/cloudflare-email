@@ -206,4 +206,14 @@ class EventConsumerTest < Minitest::Test
     end
     assert_not_requested :post, endpoint("pull")
   end
+
+  def test_ambiguous_pull_failure_reports_an_unknown_request_not_a_delivery
+    request = stub_request(:post, endpoint("pull")).to_raise(Net::ReadTimeout)
+    error = assert_raises(Cloudflare::Email::NetworkError) { @consumer.poll { |_event| } }
+    # Pulling a queue delivers nothing. Naming a delivery outcome here sends an
+    # operator looking for a message that was never in flight.
+    assert_match(/request outcome is unknown/, error.message)
+    refute_match(/delivery/, error.message)
+    assert_requested request, times: 1
+  end
 end

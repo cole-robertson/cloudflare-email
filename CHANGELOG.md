@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Describe an unreadable provider response as an unknown *request* outcome rather
+  than an unknown *delivery* outcome. `Client#request` serves every caller, so a
+  queue pull that timed out reported that a delivery outcome was unknown when no
+  message was in flight — sending operators to look for an email that never
+  existed. Sending callers keep their own delivery-specific wording.
+
 ## 0.4.0 — 2026-09-14
 
 Released alongside Mailbox Kit 0.1.0. Cloudflare installs the core automatically.
