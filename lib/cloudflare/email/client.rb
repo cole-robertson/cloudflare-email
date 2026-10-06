@@ -15,6 +15,7 @@ module Cloudflare
       DEFAULT_BACKOFF  = 0.5
       DEFAULT_MAX_RESPONSE_BYTES = 1_048_576
       MAX_RETRY_AFTER  = 60 # seconds; never sleep longer than this even if server says so
+      PROVIDER_TEXT_LIMIT = 200 # characters of an unstructured error body quoted in a message
 
       RETRYABLE_NETWORK = [
         Net::OpenTimeout, Net::ReadTimeout, Net::WriteTimeout, Errno::ECONNRESET,
@@ -235,7 +236,7 @@ module Cloudflare
 
       def handle_response(response, raw = response.body)
         status  = response.code.to_i
-        body    = parse_body(raw)
+        body    = parse_body(raw, status)
         retry_after = response["Retry-After"]
 
         # Stash Retry-After on the error response so retry logic can use it.
@@ -267,11 +268,28 @@ module Cloudflare
         end
       end
 
-      def parse_body(raw)
+      # A 2xx that is not readable JSON fails closed: the request may have taken
+      # effect. A non-2xx was refused, so a body that is not a Cloudflare JSON
+      # object (a plain-text throttle, a bare JSON string) is reported as the
+      # provider's own words rather than as an unknown outcome.
+      def parse_body(raw, status)
         return {} if raw.nil? || raw.empty?
-        JSON.parse(raw)
+        parsed = JSON.parse(raw)
+        return parsed if parsed.is_a?(Hash) || (200..299).cover?(status)
+        unstructured_error(status, parsed.is_a?(String) ? parsed : raw)
       rescue JSON::ParserError
-        { "errors" => [{ "message" => "invalid JSON API response; request outcome is unknown" }] }
+        return { "errors" => [{ "message" => "invalid JSON API response; request outcome is unknown" }] } if (200..299).cover?(status)
+        unstructured_error(status, raw)
+      end
+
+      def unstructured_error(status, text)
+        text = text.to_s.dup.force_encoding(Encoding::UTF_8).scrub("").gsub(/[[:cntrl:][:space:]]+/, " ").strip
+        # Markup is an error page, not a reason; never echo it.
+        text = "invalid JSON API response" if text.empty? || text.start_with?("<")
+        text = "#{text[0, PROVIDER_TEXT_LIMIT]}..." if text.length > PROVIDER_TEXT_LIMIT
+        # A 5xx may have failed after taking effect; a 4xx/429 was refused.
+        text = "#{text}; request outcome is unknown" if status >= 500
+        { "errors" => [{ "message" => "HTTP #{status}: #{text}" }] }
       end
 
       def extract_message(body)

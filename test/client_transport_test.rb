@@ -194,10 +194,19 @@ class ClientTransportTest < Minitest::Test
     refute_match(/secret/, error.full_message)
     assert_nil error.cause
     assert_requested request, times: 1
-    stub_request(:post, send_endpoint).to_return(status: 503, body: "secret-body is not JSON")
+    # An HTML error page is not a reason; it is never echoed.
+    stub_request(:post, send_endpoint).to_return(status: 503, body: "<html>secret-body is not JSON</html>")
     error = assert_raises(Cloudflare::Email::ServerError) { send_message(make_client) }
     refute_match(/secret/, error.full_message)
     refute_match(/secret/, error.response.inspect)
+    assert_equal "HTTP 503: invalid JSON API response; request outcome is unknown", error.message
+    assert_nil error.cause
+  end
+
+  def test_unstructured_error_text_is_bounded_and_single_line
+    stub_request(:post, send_endpoint).to_return(status: 503, body: "overloaded\r\n\t\0#{'x' * 500}")
+    error = assert_raises(Cloudflare::Email::ServerError) { send_message(make_client) }
+    assert_match(/\AHTTP 503: overloaded x{189}\.\.\.; request outcome is unknown\z/, error.message)
     assert_nil error.cause
   end
 end

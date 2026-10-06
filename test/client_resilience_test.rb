@@ -86,6 +86,24 @@ class ClientResilienceTest < Minitest::Test
     assert_equal [5.0], client.sleep_calls
   end
 
+  def test_retry_after_is_honored_when_the_429_body_is_not_a_json_object
+    ["Queue is overloaded. Please back off.", JSON.generate("Queue is overloaded. Please back off.")].each do |body|
+      stub_request(:post, send_endpoint)
+        .to_return(
+          { status: 429, headers: { "Retry-After" => "3" }, body: body },
+          { status: 200, body: JSON.generate(cloudflare_success_body) },
+        )
+
+      client = SleepTrackingClient.new(
+        account_id: ACCOUNT_ID, api_token: API_TOKEN, retries: 1, initial_backoff: 0.0,
+      )
+
+      assert client.send(from: "a@b.com", to: "c@d.com", subject: "x", text: "y").success?
+      assert_equal [3.0], client.sleep_calls, "Retry-After dropped for body #{body.inspect}"
+      WebMock.reset!
+    end
+  end
+
   def test_429_without_retry_after_falls_back_to_backoff
     stub_request(:post, send_endpoint)
       .to_return(
