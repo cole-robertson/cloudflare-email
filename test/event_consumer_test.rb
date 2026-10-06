@@ -216,4 +216,24 @@ class EventConsumerTest < Minitest::Test
     refute_match(/delivery/, error.message)
     assert_requested request, times: 1
   end
+
+  # REBULK-62: Cloudflare Queues refused a pull with a 429 whose body was bare
+  # text. The refusal is known, so the error must say why, not that the outcome
+  # is unknown.
+  def test_throttled_pull_with_a_plain_text_body_reports_the_providers_reason
+    consumer = Cloudflare::Email::EventConsumer.new(
+      queue_id: "queue-123", account_id: ACCOUNT_ID, api_token: API_TOKEN, retries: 0,
+    )
+    # The production body, and the same text sent as a JSON string literal.
+    ["Queue is overloaded. Please back off.", JSON.generate("Queue is overloaded. Please back off.")].each do |body|
+      request = stub_request(:post, endpoint("pull")).to_return(status: 429, body: body)
+      error = assert_raises(Cloudflare::Email::RateLimitError) { consumer.poll { |_event| } }
+      assert_equal "HTTP 429: Queue is overloaded. Please back off.", error.message
+      refute_match(/unknown/, error.message)
+      assert_equal 429, error.status
+      assert_kind_of Hash, error.response
+      assert_requested request, times: 1
+      WebMock.reset!
+    end
+  end
 end

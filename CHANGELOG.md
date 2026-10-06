@@ -1,7 +1,20 @@
 # Changelog
 
-## Unreleased
+## 0.4.1 — 2026-10-06
 
+- Report the provider's own reason when a refused request returns a body that
+  is not a Cloudflare JSON object. Cloudflare Queues throttles a pull with
+  `429` and the bare text `Queue is overloaded. Please back off.`; that raised
+  `RateLimitError: invalid JSON API response; request outcome is unknown`, which
+  dropped the reason and called a known refusal unknown. It now raises
+  `RateLimitError: HTTP 429: Queue is overloaded. Please back off.` The text is
+  collapsed to one line and capped at 200 characters; an HTML error page is
+  still never echoed. A `5xx` keeps "request outcome is unknown" because it may
+  have failed after taking effect, and an unreadable `2xx` still fails closed.
+  Error classes and retry behaviour are unchanged.
+- Honour `Retry-After` on a `429` whose body is a bare JSON string. The parsed
+  string was not a Hash, so the header was never stashed and the retry slept
+  the default backoff instead.
 - Describe an unreadable provider response as an unknown *request* outcome rather
   than an unknown *delivery* outcome. `Client#request` serves every caller, so a
   queue pull that timed out reported that a delivery outcome was unknown when no
