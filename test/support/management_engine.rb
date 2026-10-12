@@ -319,8 +319,10 @@ class ManagementEngineIntegrationTest < Minitest::Test
     def test_concurrent_postgres_source_delivery_recovers_the_unique_conflict
       require "timeout"
       activate_addresses
+      # Hold both deliveries just before their row insert, after each has
+      # uploaded its bytes outside any transaction, so both inserts race.
       model = ActionMailbox::InboundEmail
-      original = model.method(:create_and_extract_message_id!)
+      original = model.method(:create!)
       entered, release = Queue.new, Queue.new
       barrier = ->(*args, **options) do
         entered << true
@@ -328,7 +330,7 @@ class ManagementEngineIntegrationTest < Minitest::Test
         original.call(*args, **options)
       end
       workers = []
-      model.stub(:create_and_extract_message_id!, barrier) do
+      model.stub(:create!, barrier) do
         2.times do
           workers << Thread.new do
             ActiveRecord::Base.connection_pool.with_connection do
