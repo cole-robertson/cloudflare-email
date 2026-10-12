@@ -3,11 +3,30 @@ require "mailbox_kit/tenancy"
 
 module MailboxKit
   module ActiveRecord
-    # Rails may inspect every model's pool while preloading schema metadata
-    # before any request has selected a tenant. Report an unavailable
-    # connection using Rails' error hierarchy so boot can recover, while
-    # retaining the same fail-closed guard for every caller.
     class TenantConnectionUnavailable < ::ActiveRecord::ConnectionNotEstablished; end
+
+    # Returned instead of a pool while no valid tenant context is selected.
+    # Rails' production boot asks every model's pool for its schema reflection
+    # before any tenant exists (railtie "active_record.define_attribute_methods");
+    # raising there aborts that loop for every model still to come. This answers
+    # only that probe, with an empty reflection, and raises for anything else.
+    class UnavailablePool
+      def initialize(error)
+        @error = error
+      end
+
+      def schema_reflection
+        ::ActiveRecord::ConnectionAdapters::SchemaReflection.new(nil)
+      end
+
+      def method_missing(*)
+        raise TenantConnectionUnavailable, @error.message, cause: @error
+      end
+
+      def respond_to_missing?(*)
+        false
+      end
+    end
 
     # Uses the host's abstract tenant connection owner when explicitly configured.
     class Base < Tenancy.model_base(::ActiveRecord::Base)
@@ -19,7 +38,7 @@ module MailboxKit
             begin
               Tenancy.require_context!
             rescue ConfigurationError => error
-              raise TenantConnectionUnavailable, error.message
+              return UnavailablePool.new(error)
             end
           end
           super

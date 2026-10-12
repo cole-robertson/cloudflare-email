@@ -132,7 +132,7 @@ class TenantFoundationTest < Minitest::Test
     %i[EventReceipt OutboundDelivery OutboundRecipient OutboundReconciliation].each do |name|
       klass = Cloudflare::Email::ActiveRecord.const_get(name)
       assert klass < TenantRecord
-      assert_raises(Cloudflare::Email::ActiveRecord::TenantConnectionUnavailable) { klass.connection_pool }
+      assert_raises(Cloudflare::Email::ActiveRecord::TenantConnectionUnavailable) { klass.connection_pool.with_connection {} }
     end
   end
 

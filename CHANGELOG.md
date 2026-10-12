@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- Mailbox Kit: stop aborting Rails' production attribute preloader. Without a
+  Mailbox Kit tenant context, `connection_pool` raised
+  `TenantConnectionUnavailable`; Rails 8.1's `active_record.define_attribute_methods`
+  initializer asks every model for `connection_pool.schema_reflection` inside one
+  rescue, so the first Mailbox Kit model ended the loop (printing "Failed to
+  define attribute methods ...") and every model after it — including the host's
+  own — was left to define its attribute methods on first use. `connection_pool`
+  now returns a placeholder that answers only `schema_reflection` (empty, so
+  nothing is defined for Mailbox Kit models) and raises the same
+  `TenantConnectionUnavailable` for anything else. Queries, construction and
+  connection checkout without a context still fail closed.
+
 ## 0.4.1 — 2026-10-06
 
 - Report the provider's own reason when a refused request returns a body that
