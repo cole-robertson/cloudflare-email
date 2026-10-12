@@ -12,6 +12,7 @@ require "cloudflare/email/engine"
 require "cloudflare/email/tenancy"
 require "cloudflare/email/mailboxes/configuration"
 require "rack/test"
+require "minitest/mock"
 
 MAILBOX_INGRESS_ROOT = Dir.mktmpdir("cf-tenant-ingress")
 ENV["RAILS_ENV"] = "test"
@@ -193,6 +194,57 @@ class MailboxIngressIntegrationTest < Minitest::Test
     assert_equal 422, last_response.status
     Email::Mailboxes.for_tenant("alpha") { assert_equal 0, ActionMailbox::InboundEmail.count }
     assert_nil Email::Tenancy.current_key
+  end
+
+  # A database transaction can hold the tenant's write lock (SQLite from BEGIN
+  # when transactions are immediate), so the raw upload must happen before one
+  # opens. Records the tenant connection's open transactions at each upload.
+  def upload_depths
+    depths = []
+    service = ActiveStorage::Blob.services.fetch(:local)
+    original = service.method(:upload)
+    service.define_singleton_method(:upload) do |*args, **kwargs|
+      depths << ActiveStorage::Blob.connection.open_transactions
+      original.call(*args, **kwargs)
+    end
+    yield
+    depths
+  ensure
+    service.singleton_class.send(:remove_method, :upload)
+  end
+
+  def stored_raw_files
+    Dir.glob("#{MAILBOX_INGRESS_ROOT}/blobs/**/*").select { |path| File.file?(path) && File.binread(path) == raw }
+  end
+
+  def test_raw_email_is_uploaded_before_any_transaction_opens
+    depths = upload_depths do
+      post_mail("support@alpha.example.com")
+      assert_equal 200, last_response.status
+    end
+    assert_equal [0], depths
+    Email::Mailboxes.for_tenant("alpha") { assert_equal raw, ActionMailbox::InboundEmail.last.raw_email.download }
+  end
+
+  def test_duplicate_delivery_uploads_nothing
+    post_mail("support@alpha.example.com")
+    before = stored_raw_files
+    depths = upload_depths do
+      post_mail("support@alpha.example.com")
+      assert_equal 200, last_response.status
+    end
+    assert_empty depths
+    assert_equal before, stored_raw_files
+  end
+
+  def test_rolled_back_delivery_leaves_no_raw_bytes
+    before = stored_raw_files
+    failure = ->(*) { raise ActiveRecord::StatementInvalid, "membership write failed" }
+    Email::Mailboxes::Message.stub(:create_or_find_by!, failure) do
+      assert_raises(ActiveRecord::StatementInvalid) { post_mail("support@alpha.example.com") }
+    end
+    Email::Mailboxes.for_tenant("alpha") { assert_equal 0, ActionMailbox::InboundEmail.count }
+    assert_equal before, stored_raw_files
   end
 
   def test_membership_retains_raw_mail_until_explicit_purge
