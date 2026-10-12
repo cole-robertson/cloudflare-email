@@ -13,6 +13,18 @@
   nothing is defined for Mailbox Kit models) and raises the same
   `TenantConnectionUnavailable` for anything else. Queries, construction and
   connection checkout without a context still fail closed.
+- Mailbox Kit: upload the raw email before opening a transaction. `InboundEmail.persist`
+  stored the bytes inside its own transaction, and `Mailboxes.receive(source:)` and
+  `Ingress::VerifiedMessage#receive_into_mailbox!` called it inside the membership
+  transaction, so the storage round trip (an S3 PUT in production) ran while the
+  transaction held the database's write lock. On SQLite with immediate transactions
+  that stalled every other writer to the tenant. Now the bytes upload first and only
+  rows are written under the lock. New `InboundEmail.prepare(...)` returns an
+  uploaded-but-unsaved delivery whose `#persist` writes the rows, for hosts with their
+  own transaction. A duplicate uploads nothing. Bytes no committed row names (a rolled
+  back delivery, or one a concurrent delivery beat) are deleted once the transaction
+  has finished. The duplicate checks under the lock bypass the query cache, which
+  would otherwise repeat the answer from before the upload.
 
 ## 0.4.1 — 2026-10-06
 

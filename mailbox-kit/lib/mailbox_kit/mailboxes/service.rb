@@ -39,15 +39,26 @@ module MailboxKit
         raise ArgumentError, "provide source or a persistence block, not both" if source && block
         raise ArgumentError, "source or persistence block required" unless source || block
         in_recipient_tenant(recipient) do |session, address, directory|
-          session.receive(address, directory) do |destination|
-            if block
-              # Legacy custom persistence blocks must return the existing Rails
-              # record on duplicates when membership attachment is desired.
-              block.lambda? && block.arity.zero? ? block.call : block.call(destination)
-            else
-              require "mailbox_kit/inbound_email"
-              InboundEmail.persist(source: source).record
+          if source
+            # Upload before session.receive opens the membership transaction,
+            # and only for a destination that can accept it.
+            session.with_recipient(address, directory) { nil }
+            require "mailbox_kit/inbound_email"
+            prepared = InboundEmail.prepare(source: source)
+          end
+          begin
+            session.receive(address, directory) do |destination|
+              if block
+                # Legacy custom persistence blocks must return the existing Rails
+                # record on duplicates when membership attachment is desired.
+                block.lambda? && block.arity.zero? ? block.call : block.call(destination)
+              else
+                prepared.persist.record
+              end
             end
+          ensure
+            # The transaction has finished: delete the upload if it rolled back.
+            prepared&.discard
           end
         end
       end

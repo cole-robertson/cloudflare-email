@@ -44,9 +44,17 @@ module Cloudflare
         # missing membership without scheduling Rails processing again.
         def receive_into_mailbox!
           result = nil
-          Mailboxes.receive(recipient: envelope.fetch("to")) do
-            result = persist_rails_record
-            result.record
+          prepared = nil
+          recipient = envelope.fetch("to")
+          # Upload before the membership transaction opens (see InboundEmail).
+          Mailboxes.with_recipient(recipient: recipient) { prepared = prepare_rails_record }
+          begin
+            Mailboxes.receive(recipient: recipient) do
+              result = prepared.persist
+              result.record
+            end
+          ensure
+            Mailboxes.for_tenant(prepared.tenant_key) { prepared.discard } if prepared
           end
           result.record if result.created?
         end
@@ -54,8 +62,12 @@ module Cloudflare
         private
 
         def persist_rails_record
+          prepare_rails_record.persist
+        end
+
+        def prepare_rails_record
           require "mailbox_kit/inbound_email"
-          MailboxKit::InboundEmail.persist(source: body, message_checksum: message_checksum,
+          MailboxKit::InboundEmail.prepare(source: body, message_checksum: message_checksum,
             message_id: stable_message_id, metadata: storage_metadata)
         end
 
