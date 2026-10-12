@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.4.2 — 2026-10-12
+
+Released alongside Mailbox Kit 0.1.1, which it now requires.
 
 - Mailbox Kit: stop aborting Rails' production attribute preloader. Without a
   Mailbox Kit tenant context, `connection_pool` raised
