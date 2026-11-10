@@ -299,6 +299,10 @@ export async function forwardEmail(message, env, { metadata } = {}) {
 }
 
 const PENDING_PREFIX = "cloudflare-email/pending/";
+// HTTP 410 is the receiver saying no retry can ever succeed (for example a
+// domain nobody owns). The exact stored object moves here: kept for
+// investigation, out of the retry set and out of pending monitoring.
+const REFUSED_PREFIX = "cloudflare-email/refused/";
 const CURSOR_KEY = "cloudflare-email/state/sweep";
 
 function durableConfig(env) {
@@ -387,6 +391,15 @@ export async function deliverRetainedEmail(key, env) {
   const headers = await signedEmailHeaders({ secret: env.INGRESS_SECRET, raw,
     from: context.from, to: context.to, metadata: context.metadata });
   const result = await postEmail(env.RAILS_INGRESS_URL, headers, raw, 15_000);
+  if (result.reason === "http_status" && result.httpStatus === 410) {
+    // Copy before delete: a failed copy leaves the pending object retrying, and
+    // a failed delete repeats the identical copy on the next attempt.
+    await bucket.put(`${REFUSED_PREFIX}${key.slice(PENDING_PREFIX.length)}`, stored,
+      { httpMetadata: { contentType: "application/octet-stream" } });
+    durableLog("refused_retained", key, 410);
+    await bucket.delete(key);
+    return;
+  }
   if (result.reason !== "delivered") {
     durableLog(result.reason, key, result.httpStatus);
     throw new Error("inbound handoff incomplete");
