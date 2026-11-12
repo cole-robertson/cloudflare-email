@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Worker: an HTTP 410 from the receiver moves the retained message, byte for
+  byte, from `cloudflare-email/pending/` to `cloudflare-email/refused/` and stops
+  retrying it. Every other non-2xx response still retains and retries. Without
+  it, a permanently undeliverable message (mail to a domain nobody owns) retried
+  every minute forever and held the pending-age alarm open.
+
 ## 0.4.2 — 2026-10-12
 
 Released alongside Mailbox Kit 0.1.1, which it now requires.

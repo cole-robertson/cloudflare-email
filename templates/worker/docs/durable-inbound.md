@@ -54,9 +54,15 @@ Unknown values fail rather than choosing a transport implicitly.
 4. The consumer signs the original bytes and metadata with a fresh timestamp and
    POSTs to Rails. Only HTTP 2xx permits deleting the pending object; the queue
    message is acknowledged only after that deletion completes.
-5. Timeout, connection failure, redirect, 401, 413 and all other non-2xx responses
-   retain the object and retry. Fix credentials or size configuration for errors
-   that cannot resolve themselves. There is no automatic discard on client errors.
+5. Timeout, connection failure, redirect, 401, 404, 413 and all other non-2xx
+   responses except 410 retain the object and retry. Fix credentials or size
+   configuration for errors that cannot resolve themselves.
+6. HTTP 410 means the receiver will never accept this message (for example a
+   recipient domain nobody owns). The Worker copies the exact stored object to
+   `cloudflare-email/refused/<id>`, then deletes the pending object. Nothing is
+   discarded: refused objects stay for investigation and are never retried or
+   counted as pending. Return 410 only for a permanent answer; anything that a
+   configuration fix could resolve should stay a retryable status.
 
 If Rails saved a message but its response was lost, replay sends the same message
 identity. Rails ingress deduplicates using the original bytes and envelope (and

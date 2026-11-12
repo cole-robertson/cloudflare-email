@@ -123,7 +123,7 @@ describe("durable inbound", () => {
     expect(new Uint8Array(vi.mocked(fetch).mock.calls[0][1].body)).toEqual(raw);
   });
 
-  it.each([401, 413, 429, 500, 503, 302])("retains HTTP %s until recovery, even after queue exhaustion", async status => {
+  it.each([401, 404, 413, 429, 500, 503, 302])("retains HTTP %s until recovery, even after queue exhaustion", async status => {
     const { env, objects } = setup();
     const { key } = await retainEmail(message(), env);
     vi.mocked(fetch).mockResolvedValueOnce(new Response(null, { status }));
@@ -135,6 +135,32 @@ describe("durable inbound", () => {
     // No queue redelivery: recovery depends exclusively on the scheduled sweep.
     await sweepRetainedEmails(env);
     expect(objects.has(key)).toBe(false);
+  });
+
+  it("moves an HTTP 410 refusal out of pending, byte for byte, and acknowledges it", async () => {
+    const { env, objects } = setup();
+    const { key } = await retainEmail(message(), env);
+    const stored = objects.get(key);
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(null, { status: 410 }));
+    const item = { body: { version: 1, key }, ack: vi.fn(), retry: vi.fn() };
+    await consumeRetainedEmails({ messages: [item] }, env);
+    expect(item.ack).toHaveBeenCalled();
+    expect(item.retry).not.toHaveBeenCalled();
+    expect(objects.has(key)).toBe(false);
+    const refused = key.replace(prefix, "cloudflare-email/refused/");
+    expect(objects.get(refused)).toEqual(stored);
+    await sweepRetainedEmails(env);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a 410 refusal pending when the refused copy cannot be written", async () => {
+    const { env, bucket, objects } = setup();
+    const { key } = await retainEmail(message(), env);
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(null, { status: 410 }));
+    bucket.put.mockRejectedValueOnce(new Error("unavailable"));
+    await expect(deliverRetainedEmail(key, env)).rejects.toThrow("unavailable");
+    expect(objects.has(key)).toBe(true);
+    expect(bucket.delete).not.toHaveBeenCalled();
   });
 
   it("replays lost HTTP acknowledgements with identical bytes and metadata but fresh signatures", async () => {
